@@ -12,14 +12,23 @@ const backpackEmoji = '🎒';
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('profile_view')
-    .setDescription('👤 Ver tu perfil de jugador'),
+    .setDescription('👤 Ver tu perfil o el de otro usuario')
+    // AQUI AGREGAMOS LA OPCIÓN DE USUARIO
+    .addUserOption(option => 
+      option.setName('user')
+        .setDescription('¿El perfil de quién quieres ver?')
+        .setRequired(false) // Es opcional: si no pones nada, muestra el tuyo
+    ),
 
   async execute(interaction) {
-    const userId = interaction.user.id;
+    // LÓGICA: Si seleccionaron un usuario, usamos ese. Si no, usamos al que escribió el comando.
+    const targetUser = interaction.options.getUser('user') || interaction.user;
+    const userId = targetUser.id;
 
     try {
       await interaction.deferReply();
 
+      // 1. Buscar datos del usuario en Supabase
       const { data: user, error: userError } = await supabase
         .from('users')
         .select('*')
@@ -27,9 +36,15 @@ module.exports = {
         .single();
 
       if (userError || !user) {
-        return interaction.editReply('❌ No encontré tu perfil.');
+        // Mensaje diferente si soy yo o si es otro
+        const msg = targetUser.id === interaction.user.id 
+          ? '❌ No tienes un perfil registrado aún.' 
+          : `❌ **${targetUser.username}** no tiene un perfil registrado.`;
+        
+        return interaction.editReply(msg);
       }
 
+      // 2. Contar cartas
       const { count, error: countError } = await supabase
         .from('user_cards')
         .select('*', { count: 'exact', head: true })
@@ -37,9 +52,10 @@ module.exports = {
 
       if (countError) {
         console.error(countError);
-        return interaction.editReply('❌ Error al contar tus cartas.');
+        return interaction.editReply('❌ Error al contar las cartas.');
       }
 
+      // 3. Buscar carta favorita
       let favCardInfo = 'Ninguna seleccionada';
       let favCardImage = null;
 
@@ -57,16 +73,17 @@ module.exports = {
         }
       }
 
+      // 4. Crear Embed
       const embed = new EmbedBuilder()
         .setColor('#1abc9c')
-        .setTitle(`👤 Perfil de ${interaction.user.username}`)
+        .setTitle(`👤 Perfil de ${targetUser.username}`) // Nombre del usuario objetivo
         .addFields(
           { name: `${moneyEmoji} Balance`, value: `${user.balance}`, inline: true },
           { name: `${backpackEmoji} Cartas`, value: `${count}`, inline: true },
           { name: '📅 Jugando desde', value: user.created_at ? new Date(user.created_at).toLocaleDateString() : 'Desconocido', inline: true },
           { name: '⭐ Favorita', value: favCardInfo }
         )
-        .setThumbnail(interaction.user.displayAvatarURL())
+        .setThumbnail(targetUser.displayAvatarURL({ dynamic: true })) // Avatar del usuario objetivo
         .setTimestamp();
 
       if (favCardImage) {
@@ -74,9 +91,10 @@ module.exports = {
       }
 
       await interaction.editReply({ embeds: [embed] });
+
     } catch (err) {
       console.error('Error en profile_view:', err);
-      await interaction.editReply('❌ Hubo un error al mostrar tu perfil.');
+      await interaction.editReply('❌ Hubo un error al mostrar el perfil.');
     }
   }
 };
