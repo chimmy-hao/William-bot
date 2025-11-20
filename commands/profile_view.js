@@ -80,7 +80,8 @@ module.exports = {
         .addFields(
           { name: `${moneyEmoji} Balance`, value: `${user.balance}`, inline: true },
           { name: `${backpackEmoji} Cartas`, value: `${count}`, inline: true },
-          { name: '📅 Jugando desde', value: user.created_at ? new Date(user.created_at).toLocaleDateString() : 'Desconocido', inline: true },
+          // AQUÍ ESTÁ EL CAMBIO: Agregado 'es-ES'
+          { name: '📅 Jugando desde', value: user.created_at ? new Date(user.created_at).toLocaleDateString('es-ES') : 'Desconocido', inline: true },
           { name: '⭐ Favorita', value: favCardInfo }
         )
         .setThumbnail(targetUser.displayAvatarURL({ dynamic: true })) // Avatar del usuario objetivo
