@@ -6,47 +6,74 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANO
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('view')
-    .setDescription('Muestra solo la imagen de las cartas que tenés en tu inventario')
+    .setDescription('📸 Visualiza hasta 10 cartas de TU inventario')
     .addStringOption(option => 
       option.setName('codes')
-            .setDescription('Códigos de las cartas separados por espacios (máx 10)')
+            .setDescription('Códigos separados por espacios (Ej: WMO.1234 WMO.5678)')
             .setRequired(true)
     ),
 
   async execute(interaction) {
-    const userId = interaction.user.id.toString();
-    let codes = interaction.options.getString('codes')
-      .split(' ')
-      .map(c => c.trim())
-      .filter(c => c)
+    const userId = interaction.user.id;
+    const inputCodes = interaction.options.getString('codes');
+
+    // 1. Procesar los códigos (máximo 10)
+    const codes = inputCodes
+      .split(/[\s,]+/)
+      .filter(c => c.length > 0)
       .slice(0, 10);
 
     if (codes.length === 0) {
-      return interaction.reply({ content: 'No se proporcionaron códigos válidos.', ephemeral: true });
+      return interaction.reply({ content: '❌ Debes escribir al menos un código.', ephemeral: true });
     }
 
-    // Traer solo cartas del usuario que estén en los códigos y no sean null
-    const { data: userCards, error } = await supabase
-      .from('user_cards')
-      .select('unique_card_id, cards(*)')
-      .in('unique_card_id', codes)
-      .eq('user_id', userId)
-      .not('unique_card_id', 'is', null);
+    try {
+      await interaction.deferReply();
 
-    if (error) {
-      console.error(error);
-      return interaction.reply({ content: 'Error al consultar tu inventario.', ephemeral: true });
+      // 2. Consulta SEGURA a Supabase
+      const { data: userCards, error } = await supabase
+        .from('user_cards')
+        .select(`
+          unique_card_id,
+          base_cards (
+            name,
+            group_name,
+            image_url
+          )
+        `)
+        .in('unique_card_id', codes)
+        .eq('user_id', userId); // 🔒 CANDADO DE SEGURIDAD: Solo trae cartas si el dueño eres TÚ
+
+      if (error) {
+        console.error('Error view:', error);
+        return interaction.editReply('❌ Error al buscar las cartas.');
+      }
+
+      // Si no encontró ninguna (o las que encontró son de otros), da error.
+      if (!userCards || userCards.length === 0) {
+        return interaction.editReply('❌ No tienes ninguna de esas cartas en tu inventario.');
+      }
+
+      // 3. Crear Embeds
+      const embeds = userCards.map(card => {
+        // Limpiamos el nombre para que se vea bonito (igual que en inventory)
+        const cleanName = card.base_cards.name.split(' — ')[0].trim();
+        
+        return new EmbedBuilder()
+          .setColor('#2b2d31')
+          .setTitle(`${cleanName} — ${card.base_cards.group_name || 'Sin grupo'}`)
+          .setDescription(`🆔 \`${card.unique_card_id}\``)
+          .setImage(card.base_cards.image_url);
+      });
+
+      await interaction.editReply({ 
+        content: `📸 Mostrando ${embeds.length} carta(s) de tu colección:`, 
+        embeds: embeds 
+      });
+
+    } catch (err) {
+      console.error(err);
+      await interaction.editReply('❌ Error al ejecutar el comando.');
     }
-
-    if (!userCards || userCards.length === 0) {
-      return interaction.reply({ content: 'No se encontraron cartas de tu inventario con esos códigos.', ephemeral: true });
-    }
-
-    const embeds = userCards.map(uc => new EmbedBuilder()
-      .setImage(uc.cards.image_url)
-      .setColor('Blurple') // opcional, para que el embed no quede gris
-    );
-
-    await interaction.reply({ embeds });
   }
 };
