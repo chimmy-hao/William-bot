@@ -28,7 +28,8 @@
     "dotenv": "^16.4.5",
     "node-fetch": "^2.7.0",
     "pg": "^8.11.3",
-    "sharp": "^0.32.6"
+    "sharp": "^0.32.6",
+    "@napi-rs/canvas": "^0.1.44"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
