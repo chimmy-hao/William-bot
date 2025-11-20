@@ -111,7 +111,16 @@ async function deployCommands() {
 client.once(Events.ClientReady, async readyClient => {
     console.log(`🤖 Bot is ready! Logged in as ${readyClient.user.tag}`);
     console.log(`📊 Serving ${client.guilds.cache.size} guilds`);
-    client.user.setActivity('Managing Photocards 📸', { type: 'WATCHING' });
+    
+    // 👇 NUEVO ESTADO: Listening to ทัก (FIRST SIGHT) - LYKN
+    client.user.setPresence({
+        activities: [{
+            name: 'ทัก (FIRST SIGHT) - LYKN', 
+            type: 2, // 2 significa LISTENING
+        }],
+        status: 'online',
+    });
+
     await deployCommands();
     cleanupTempDirectory();
 });
