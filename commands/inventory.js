@@ -1,4 +1,4 @@
-cconst { 
+const { 
   SlashCommandBuilder, 
   EmbedBuilder, 
   ActionRowBuilder, 
@@ -244,4 +244,5 @@ module.exports = {
       await interaction.editReply('❌ Ocurrió un error al mostrar tu colección.');
     }
   }
+
 };
