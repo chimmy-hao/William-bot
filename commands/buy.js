@@ -25,12 +25,18 @@ module.exports = {
 
   async autocomplete(interaction) {
     const focused = interaction.options.getFocused(true);
+
     if (focused.name === 'pack') {
       const choices = Object.entries(packsList).map(([code, pack]) => ({
-        name: `${pack.emoji} ${pack.name} (${pack.price} berrycoins)`,
+        // CAMBIO: Quité ${pack.emoji} para que no salga el código feo
+        name: `${pack.name} (${pack.price} berrycoins)`,
         value: code
       }));
-      const filtered = choices.filter(c => c.name.toLowerCase().includes(focused.value.toLowerCase())).slice(0, 25);
+
+      const filtered = choices
+        .filter(c => c.name.toLowerCase().includes(focused.value.toLowerCase()))
+        .slice(0, 25);
+
       return interaction.respond(filtered);
     }
   },
@@ -73,8 +79,7 @@ module.exports = {
 
       if (payError) throw new Error('Error al cobrar');
 
-      // 4. === LÓGICA CORREGIDA: SUMAR PACKS ===
-      // Buscar cantidad actual
+      // 4. Sumar packs
       const { data: currentPack } = await supabase
         .from('user_packs')
         .select('quantity')
@@ -84,7 +89,6 @@ module.exports = {
 
       const newQuantity = (currentPack?.quantity || 0) + 1;
 
-      // Guardar nueva cantidad
       const { error: upsertError } = await supabase
         .from('user_packs')
         .upsert(
