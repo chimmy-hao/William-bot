@@ -44,9 +44,9 @@ module.exports = {
     .setName('photocard')
     .setDescription('🎰 ¡Tira para obtener una photocard aleatoria! (Cooldown: 5 min)'),
 
-  // --- LÍNEA AGREGADA PARA EL RESET ---
+  // --- LÍNEA PARA EL RESET ---
   cooldowns: cooldowns,
-  // -----------------------------------
+  // -------------------------
 
   async execute(interaction) {
     const userId = interaction.user.id;
@@ -114,20 +114,28 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setColor(rConfig.color)
         .setTitle('✨ ¡Nueva Photocard Obtenida! ✨')
-        // Aquí está el cambio de formato de texto exacto que pediste:
         .setDescription(
           `Artist: *${randomCard.name}* del grupo *${randomCard.group_name || 'Solista'}*\n` +
           `Era: *${randomCard.era || 'Desconocida'}*`
         )
         .addFields(
-          // ID en bloque de código (caja negra pequeña)
           { name: '🎴 ID de Carta', value: `\`${uniqueId}\``, inline: true },
-          // Rareza con fresas
           { name: '🍓 Rareza', value: `${rConfig.display} ${rConfig.name}`, inline: true },
-          // Propietario con mención azul
           { name: '👤 Propietario', value: `<@${userId}>`, inline: true }
         )
         .setImage(randomCard.image_url)
         .setFooter({
           text: 'Usa /inventory para ver tu colección completa',
-          iconURL: interaction.user.
+          iconURL: interaction.user.displayAvatarURL()
+        })
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [embed] });
+
+    } catch (error) {
+      console.error('Error en /photocard:', error);
+      cooldowns.delete(userId); // Resetear cooldown si falla
+      await interaction.editReply('❌ Hubo un error al obtener tu carta. Intenta de nuevo.');
+    }
+  }
+};
