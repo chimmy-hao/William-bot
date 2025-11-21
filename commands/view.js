@@ -30,8 +30,6 @@ module.exports = {
       await interaction.deferReply();
 
       // 2. Buscar cartas en DB
-      // Si el código está mal escrito, Supabase no devolverá nada aquí, 
-      // por lo tanto la carta "rota" no se dibujará.
       const { data: userCards, error } = await supabase
         .from('user_cards')
         .select(`
@@ -41,15 +39,35 @@ module.exports = {
         .in('unique_card_id', codes)
         .eq('user_id', userId);
 
-      if (error || !userCards || userCards.length === 0) {
-        return interaction.editReply('❌ No encontré cartas tuyas con esos códigos (revisa que estén bien escritos).');
+      if (error) {
+        console.error('Error DB:', error);
+        return interaction.editReply('❌ Error de conexión al buscar las cartas.');
       }
 
-      // 3. CONFIGURACIÓN DEL GRID
+      // === VALIDACIÓN ESTRICTA ===
+      // Creamos una lista de los IDs que SÍ encontramos
+      const foundIds = userCards ? userCards.map(c => c.unique_card_id) : [];
+
+      // Filtramos cuáles de los códigos que escribiste NO aparecieron en la búsqueda
+      const missingCodes = codes.filter(code => !foundIds.includes(code));
+
+      // Si hay códigos faltantes, cancelamos todo y mostramos error
+      if (missingCodes.length > 0) {
+        return interaction.editReply({
+          content: `❌ **Error:** No encontré las siguientes cartas (o están mal escritas):\n\`${missingCodes.join(', ')}\``
+        });
+      }
+      // ==========================
+
+      if (userCards.length === 0) {
+        return interaction.editReply('❌ No se encontró ninguna carta válida.');
+      }
+
+      // 3. CONFIGURACIÓN DEL GRID (DISEÑO MINIMALISTA)
       const cardWidth = 200;
       const cardHeight = 300;
       const gap = 20;
-      const textSpace = 30; // Reduje el espacio porque la letra es más chica
+      const textSpace = 30; 
       const columns = 3;
 
       const rows = Math.ceil(userCards.length / columns);
@@ -85,7 +103,7 @@ module.exports = {
         const x = gap + (col * (cardWidth + gap));
         const y = gap + (row * (cardHeight + textSpace + gap));
 
-        // -- DIBUJAR IMAGEN (BORDES REDONDEADOS) --
+        // -- IMAGEN --
         const radius = 15;
         ctx.save();
         ctx.beginPath();
@@ -104,24 +122,21 @@ module.exports = {
         ctx.drawImage(card.img, x, y, cardWidth, cardHeight);
         ctx.restore();
 
-        // -- DIBUJAR TEXTO (CAMBIOS AQUÍ) --
-        // Tomamos solo la primera parte del código (ej: CWJLE1)
+        // -- TEXTO --
+        // Código corto (prefijo)
         const prefix = card.unique_card_id.split('.')[0];
 
-        // Fuente genérica y más chica
         ctx.font = '16px Arial'; 
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
         
-        // Sombra suave para que se lea si el fondo es claro, pero sutil
         ctx.shadowColor = "rgba(0,0,0,0.8)";
         ctx.shadowBlur = 3;
         ctx.lineWidth = 1;
 
         const textX = x + (cardWidth / 2);
-        const textY = y + cardHeight + 20; // Ajustado para quedar pegadito abajo
+        const textY = y + cardHeight + 20;
         
-        // Dibujamos solo el código, sin emojis ni adornos
         ctx.fillText(prefix, textX, textY);
         
         ctx.shadowBlur = 0;
