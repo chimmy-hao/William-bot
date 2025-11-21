@@ -15,10 +15,11 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY
 );
 
-// --- CONFIGURACIÓN ---
+// --- CONFIGURACIÓN EMOJIS ---
+const moneyEmoji = '<:berrycoin:1411737957081288724>';
 const strawberryEmoji = '<:strawberrity:1411384728119939182>'; 
 
-// Helper para rareza
+// Helper para estrellas/fresas
 const getRarityEmoji = (level) => {
   if (level === 1) return strawberryEmoji;
   if (level === 2) return `${strawberryEmoji}${strawberryEmoji}`;
@@ -105,11 +106,11 @@ module.exports = {
       // 3. GENERACIÓN DE IMAGEN (Canvas)
       const cardWidth = 150;
       const cardHeight = 220;
-      const gap = 15; // Un poco más de espacio
+      const gap = 15; 
       const maxCols = Math.max(myCards.length, theirCards.length);
       
       const canvasWidth = (cardWidth * maxCols) + (gap * (maxCols + 1));
-      const canvasHeight = (cardHeight * 2) + 80; // Espacio para texto
+      const canvasHeight = (cardHeight * 2) + 80;
 
       const canvas = createCanvas(canvasWidth, canvasHeight);
       const ctx = canvas.getContext('2d');
@@ -117,9 +118,9 @@ module.exports = {
       // Función auxiliar para dibujar una fila
       const drawRow = async (cards, yOffset, label) => {
         ctx.fillStyle = '#ffffff';
-        // CAMBIO: Fuente Arial Bold estándar
-        ctx.font = 'bold 22px Arial'; 
-        ctx.fillText(label, 15, yOffset - 15);
+        // CAMBIO 1: Fuente Arial 17px (más fina y pequeña)
+        ctx.font = '17px Arial'; 
+        ctx.fillText(label, 10, yOffset - 10);
 
         for (let i = 0; i < cards.length; i++) {
             const card = cards[i];
@@ -127,8 +128,8 @@ module.exports = {
             try {
                 const img = await loadImage(card.base_cards.image_url);
                 
-                // CAMBIO: Radio aumentado a 30 para bordes más redondos
-                const radius = 30; 
+                // CAMBIO 2: Radio en 10 (curva suave tipo tarjeta de crédito)
+                const radius = 10; 
                 
                 ctx.save();
                 ctx.beginPath();
@@ -153,8 +154,8 @@ module.exports = {
         }
       };
 
-      await drawRow(myCards, 50, `Tú ofreces:`);
-      await drawRow(theirCards, 50 + cardHeight + 40, `${target.username} ofrece:`);
+      await drawRow(myCards, 40, `Tú ofreces:`);
+      await drawRow(theirCards, 40 + cardHeight + 40, `${target.username} ofrece:`);
 
       const attachment = new AttachmentBuilder(await canvas.encode('png'), { name: 'trade_preview.png' });
 
@@ -163,7 +164,6 @@ module.exports = {
         return cards.map(c => {
             const rEmoji = getRarityEmoji(c.rarity || c.base_cards.rarity_level);
             const cleanName = c.base_cards.name.split(' — ')[0].trim();
-            // CAMBIO: Quitamos el diamante 💎
             return `**${cleanName}** ${rEmoji}\n${c.base_cards.group_name}\n\`${c.unique_card_id}\``;
         }).join('\n\n');
       };
