@@ -117,6 +117,10 @@ module.exports = {
     } catch (error) {
       console.error('Error en daily:', error);
       await interaction.editReply('❌ Hubo un error al reclamar tu recompensa diaria.');
-    }
+module.exports = {
+  data: new SlashCommandBuilder()..., 
+  cooldowns: cooldowns, // <--- ¡SIN ESTA LÍNEA EL RESET NO FUNCIONA!
+  async execute(interaction) {
+     // ...
   }
 };
