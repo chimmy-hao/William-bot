@@ -14,7 +14,7 @@ const supabase = createClient(
 // --- CONFIGURACIÓN ---
 const strawberryEmoji = '<:strawberrity:1411384728119939182>'; 
 // ID del Bot al que se enviarán las cartas consumidas
-const BOT_ID = process.env.CLIENT_ID; 
+const BOT_ID = 1411218644163231804; 
 
 // Helper para generar ID
 const generateUniqueCardCode = (baseCode) => {
