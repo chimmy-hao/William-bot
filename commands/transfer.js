@@ -117,7 +117,7 @@ module.exports = {
     try {
       await interaction.deferReply();
 
-      // === PASO 1: PRE-CÁLCULO (Verificar qué se va a enviar antes de hacerlo) ===
+      // === PASO 1: PRE-CÁLCULO ===
       
       let confirmMessage = `Estás a punto de transferir a **${receiver.username}**:\n`;
       let validMoney = false;
@@ -234,7 +234,7 @@ module.exports = {
             .setTimestamp();
 
           await i.update({ 
-            content: `🔔 <@${receiver.id}> ¡Te ha llegado una transferencia!`, // AQUÍ ESTÁ EL PING
+            content: `🔔 <@${receiver.id}> ¡Te ha llegado una transferencia!`,
             embeds: [successEmbed], 
             components: [] 
           });
@@ -242,4 +242,14 @@ module.exports = {
       });
 
       collector.on('end', (_, reason) => {
-        if (
+        if (reason === 'time') {
+          interaction.editReply({ content: '⏳ Tiempo de espera agotado.', components: [] }).catch(() => {});
+        }
+      });
+
+    } catch (err) {
+      console.error('Error en transfer:', err);
+      await interaction.editReply('❌ Ocurrió un error inesperado.');
+    }
+  }
+};
