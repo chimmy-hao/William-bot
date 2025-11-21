@@ -13,9 +13,7 @@ const supabase = createClient(
 
 // --- CONFIGURACIÓN ---
 const strawberryEmoji = '<:strawberrity:1411384728119939182>'; 
-
-// ID del Bot (Asegúrate de tener CLIENT_ID en tus variables de entorno)
-// Si no hay variable, usa un ID placeholder (pero asegúrate de que sea numérico si tu DB lo exige)
+// ID del Bot al que se enviarán las cartas consumidas
 const BOT_ID = process.env.CLIENT_ID; 
 
 // Helper para generar ID
@@ -92,9 +90,8 @@ module.exports = {
       return interaction.reply({ content: '⚠️ Debes usar el **Modo Manual** (escribiendo 10 códigos) o el **Modo Auto** (seleccionando Rareza e Idol).', ephemeral: true });
     }
 
-    // Verificación crítica: Si no hay CLIENT_ID configurado, avisar
     if (!BOT_ID) {
-        return interaction.reply({ content: '❌ Error de configuración: Falta la variable `CLIENT_ID` en el servidor para poder recibir las cartas quemadas.', ephemeral: true });
+        return interaction.reply({ content: '❌ Error interno: Falta configurar la variable `CLIENT_ID` en Render.', ephemeral: true });
     }
 
     try {
@@ -140,7 +137,7 @@ module.exports = {
           return interaction.editReply(`❌ No tienes suficientes cartas (Rareza ${targetRarityBase}) con esos filtros para realizar un Level Up. Necesitas 10.`);
         }
 
-        // AGRUPAR
+        // AGRUPAR (Mismo Idol + Misma Era)
         const groups = {};
         for (const c of potentialCards) {
             const key = `${c.base_cards.name}_${c.base_cards.era}`;
@@ -202,14 +199,7 @@ module.exports = {
 
       // --- EJECUCIÓN (BURN & MINT) ---
       
-      // 1. ¡SOLUCIÓN AL PROBLEMA! Asegurar que el BOT exista en la tabla 'users'
-      await supabase.from('users').upsert({ 
-          user_id: BOT_ID, 
-          username: 'William Bot (System)', 
-          balance: 0 
-      });
-
-      // 2. Ahora sí, transferir las cartas al bot
+      // 1. Transferir al BOT (Ahora funcionará porque el bot ya existe en DB)
       const idsToBurn = cardsToConsume.map(c => c.id);
 
       const { error: burnError } = await supabase
@@ -222,7 +212,7 @@ module.exports = {
         return interaction.editReply('❌ Error crítico al transferir las cartas al bot.');
       }
 
-      // 3. Crear la nueva carta
+      // 2. Crear nueva carta
       const newUniqueId = generateUniqueCardCode(targetBaseCard.card_code);
       
       const { error: mintError } = await supabase
