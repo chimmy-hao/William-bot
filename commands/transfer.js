@@ -19,7 +19,7 @@ const moneyEmoji = '<:berrycoin:1411737957081288724>';
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('transfer')
-    .setDescription('💸 Transfiere cartas, dinero o colecciones a otro usuario')
+    .setDescription('💸 Transfiere cartas, dinero, packs o colecciones a otro usuario')
     .addUserOption(opt => 
       opt.setName('user')
         .setDescription('¿A quién le vas a transferir?')
@@ -36,6 +36,14 @@ module.exports = {
         .setMinValue(1)
         .setRequired(false)
     )
+    // --- NUEVO CAMPO: PACKS ---
+    .addStringOption(opt =>
+        opt.setName('pack')
+          .setDescription('Selecciona un pack de tu inventario para transferir (1 unidad)')
+          .setAutocomplete(true)
+          .setRequired(false)
+    )
+    // --------------------------
     .addStringOption(opt =>
       opt.setName('groups')
         .setDescription('Transferir TODAS las cartas de un grupo')
@@ -70,6 +78,26 @@ module.exports = {
   async autocomplete(interaction) {
     const focused = interaction.options.getFocused(true);
     const focusName = interaction.options.getFocused(true).name;
+    const userId = interaction.user.id;
+
+    // Autocompletado de PACKS (Muestra lo que tienes en inventario)
+    if (focusName === 'pack') {
+        const { data: userPacks } = await supabase
+            .from('user_packs')
+            .select('quantity, packs(code, name, emoji)')
+            .eq('user_id', userId)
+            .gt('quantity', 0); // Solo mostrar si tienes más de 0
+
+        if (!userPacks || userPacks.length === 0) return interaction.respond([]);
+
+        const choices = userPacks.map(up => ({
+            name: `${up.packs.emoji} ${up.packs.name} (Tienes: ${up.quantity})`,
+            value: up.packs.code
+        }));
+
+        const filtered = choices.filter(c => c.name.toLowerCase().includes(focused.value.toLowerCase())).slice(0, 25);
+        return interaction.respond(filtered);
+    }
 
     if (focusName === 'groups') {
       const { data } = await supabase.from('base_cards').select('group_name').not('group_name', 'is', null);
@@ -100,6 +128,7 @@ module.exports = {
     // Inputs
     const codesInput = interaction.options.getString('codes');
     const moneyAmount = interaction.options.getInteger('money');
+    const packCode = interaction.options.getString('pack'); // Input del pack
     const groupFilter = interaction.options.getString('groups');
     const idolFilter = interaction.options.getString('idols');
     const rarityFilter = interaction.options.getInteger('rarity');
@@ -110,8 +139,9 @@ module.exports = {
     if (sender.id === receiver.id) return interaction.reply({ content: '❌ No puedes transferirte cosas a ti mismo.', ephemeral: true });
     if (receiver.bot) return interaction.reply({ content: '❌ No puedes transferirle cosas a un bot.', ephemeral: true });
     
-    if (!codesInput && !moneyAmount && !groupFilter && !idolFilter && !rarityFilter && !eraFilter) {
-      return interaction.reply({ content: '⚠️ Debes especificar qué quieres transferir.', ephemeral: true });
+    // Verificar que haya ALGO seleccionado
+    if (!codesInput && !moneyAmount && !packCode && !groupFilter && !idolFilter && !rarityFilter && !eraFilter) {
+      return interaction.reply({ content: '⚠️ Debes especificar qué quieres transferir (dinero, pack, códigos o filtros).', ephemeral: true });
     }
 
     try {
@@ -120,20 +150,44 @@ module.exports = {
       // === PASO 1: PRE-CÁLCULO ===
       
       let confirmMessage = `Estás a punto de transferir a **${receiver.username}**:\n`;
-      let validMoney = false;
+      let validTransfer = false;
+      
+      // Variables de estado
+      let senderMoneyData = null;
+      let packToTransfer = null; // Datos del pack si existe
       let cardsToTransfer = [];
 
       // A) Verificación de Dinero
       if (moneyAmount) {
-        const { data: senderData } = await supabase.from('users').select('balance').eq('user_id', sender.id).single();
-        if (!senderData || senderData.balance < moneyAmount) {
-          return interaction.editReply(`❌ No tienes suficientes ${moneyEmoji} (${senderData?.balance || 0}) para enviar ${moneyAmount}.`);
+        const { data } = await supabase.from('users').select('balance').eq('user_id', sender.id).single();
+        senderMoneyData = data;
+        if (!senderMoneyData || senderMoneyData.balance < moneyAmount) {
+          return interaction.editReply(`❌ No tienes suficientes ${moneyEmoji} para enviar ${moneyAmount}.`);
         }
         confirmMessage += `💰 **${moneyAmount}** ${moneyEmoji}\n`;
-        validMoney = true;
+        validTransfer = true;
       }
 
-      // B) Verificación de Cartas
+      // B) Verificación de Pack
+      if (packCode) {
+        // Buscar si el usuario tiene ese pack y traer info del pack
+        const { data: userPack } = await supabase
+            .from('user_packs')
+            .select('id, quantity, packs(name, emoji)')
+            .eq('user_id', sender.id)
+            .eq('pack_code', packCode)
+            .single();
+
+        if (!userPack || userPack.quantity < 1) {
+            return interaction.editReply('❌ No tienes ese pack en tu inventario.');
+        }
+        
+        packToTransfer = userPack;
+        confirmMessage += `🎁 **1 Pack:** ${userPack.packs.emoji} ${userPack.packs.name}\n`;
+        validTransfer = true;
+      }
+
+      // C) Verificación de Cartas
       if (codesInput || groupFilter || idolFilter || rarityFilter || eraFilter) {
         let query = supabase
           .from('user_cards')
@@ -155,35 +209,28 @@ module.exports = {
         if (data && data.length > 0) {
           cardsToTransfer = data;
           confirmMessage += `🃏 **${data.length} Cartas** (con los filtros seleccionados)\n`;
-        } else if (!validMoney) {
-          return interaction.editReply('❌ No se encontraron cartas tuyas que coincidan con esos filtros.');
+          validTransfer = true;
+        } else if (!validTransfer) {
+          // Si no había dinero ni pack válido y tampoco cartas
+          return interaction.editReply('❌ No se encontraron cartas tuyas con esos filtros.');
         }
       }
 
-      // Si no hay nada válido para enviar
-      if (!validMoney && cardsToTransfer.length === 0) {
+      if (!validTransfer) {
         return interaction.editReply('❌ No hay nada válido para transferir.');
       }
 
       // === PASO 2: BOTONES DE CONFIRMACIÓN ===
 
       const confirmEmbed = new EmbedBuilder()
-        .setColor('#f1c40f') // Amarillo de advertencia
+        .setColor('#f1c40f')
         .setTitle('⚠️ Confirmar Transferencia')
         .setDescription(confirmMessage + `\n📝 **Nota:** ${reason}`)
         .setFooter({ text: 'Tienes 30 segundos para confirmar' });
 
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId('confirm_transfer')
-          .setLabel('Confirmar')
-          .setStyle(ButtonStyle.Success) // Verde
-          .setEmoji('✅'),
-        new ButtonBuilder()
-          .setCustomId('cancel_transfer')
-          .setLabel('Cancelar')
-          .setStyle(ButtonStyle.Danger) // Rojo
-          .setEmoji('✖️')
+        new ButtonBuilder().setCustomId('confirm_transfer').setLabel('Confirmar').setStyle(ButtonStyle.Success).setEmoji('✅'),
+        new ButtonBuilder().setCustomId('cancel_transfer').setLabel('Cancelar').setStyle(ButtonStyle.Danger).setEmoji('✖️')
       );
 
       const message = await interaction.editReply({ embeds: [confirmEmbed], components: [row] });
@@ -191,8 +238,8 @@ module.exports = {
       // === PASO 3: CAPTURAR EL CLIC ===
       const collector = message.createMessageComponentCollector({
         componentType: ComponentType.Button,
-        time: 30000, // 30 segundos
-        filter: i => i.user.id === sender.id // Solo quien ejecutó el comando puede confirmar
+        time: 30000,
+        filter: i => i.user.id === sender.id
       });
 
       collector.on('collect', async i => {
@@ -202,15 +249,14 @@ module.exports = {
         }
 
         if (i.customId === 'confirm_transfer') {
-          // --- EJECUCIÓN REAL DE LA TRANSFERENCIA ---
+          // --- EJECUCIÓN ---
           
           // 1. Dinero
-          if (validMoney) {
-            // Restar al sender
-            const { data: sBalance } = await supabase.from('users').select('balance').eq('user_id', sender.id).single();
-            await supabase.from('users').update({ balance: sBalance.balance - moneyAmount }).eq('user_id', sender.id);
+          if (moneyAmount) {
+            // Restar al sender (usamos el dato fresco o volvemos a consultar por seguridad, aquí usamos lógica simple)
+            await supabase.from('users').update({ balance: senderMoneyData.balance - moneyAmount }).eq('user_id', sender.id);
             
-            // Sumar al receiver (crear si no existe)
+            // Sumar al receiver
             let { data: rData } = await supabase.from('users').select('balance').eq('user_id', receiver.id).single();
             if (!rData) {
                await supabase.from('users').insert({ user_id: receiver.id, username: receiver.username, balance: moneyAmount });
@@ -219,15 +265,35 @@ module.exports = {
             }
           }
 
-          // 2. Cartas
+          // 2. Pack (Solo 1 unidad por ahora)
+          if (packToTransfer) {
+             // Restar 1 al sender
+             await supabase.from('user_packs').update({ quantity: packToTransfer.quantity - 1 }).eq('id', packToTransfer.id);
+
+             // Sumar 1 al receiver (Upsert)
+             // Primero buscamos si ya tiene
+             const { data: existingRPack } = await supabase.from('user_packs')
+                .select('id, quantity')
+                .eq('user_id', receiver.id)
+                .eq('pack_code', packCode)
+                .single();
+             
+             const newQty = (existingRPack?.quantity || 0) + 1;
+             await supabase.from('user_packs').upsert(
+                { user_id: receiver.id, pack_code: packCode, quantity: newQty },
+                { onConflict: ['user_id', 'pack_code'] }
+             );
+          }
+
+          // 3. Cartas
           if (cardsToTransfer.length > 0) {
              const ids = cardsToTransfer.map(c => c.id);
              await supabase.from('user_cards').update({ user_id: receiver.id }).in('id', ids);
           }
 
-          // --- MENSAJE FINAL + PING ---
+          // --- MENSAJE FINAL ---
           const successEmbed = new EmbedBuilder()
-            .setColor('#2ecc71') // Verde éxito
+            .setColor('#2ecc71')
             .setTitle('✅ Transferencia Completada')
             .setDescription(`**De:** ${sender}\n**Para:** ${receiver}\n\n${confirmMessage}`)
             .addFields({ name: '📝 Mensaje', value: `*${reason}*` })
