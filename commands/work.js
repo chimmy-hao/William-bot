@@ -83,6 +83,11 @@ module.exports = {
     } catch (err) {
       console.error('Error en /work:', err);
       await interaction.editReply('❌ Hubo un error al ejecutar /work.');
-    }
+module.exports = {
+  data: new SlashCommandBuilder()..., 
+  cooldowns: cooldowns, // <--- ¡SIN ESTA LÍNEA EL RESET NO FUNCIONA!
+  async execute(interaction) {
+     // ...
   }
 };
+
