@@ -10,7 +10,7 @@ const supabase = createClient(
 // --- CONFIGURACIÓN ---
 const strawberryEmoji = '<:strawberrity:1411384728119939182>';
 
-// Configuración visual por nivel de rareza
+// Configuración visual por nivel de rareza (Usando Fresas)
 const rarityConfig = {
   1: { 
     display: `${strawberryEmoji}`, 
@@ -33,7 +33,7 @@ const rarityConfig = {
 const cooldowns = new Map();
 const COOLDOWN_TIME = 5 * 60 * 1000; // 5 minutos
 
-// Generador de ID único
+// Generador de ID único (Ej: WMO.1234)
 const generateUniqueCardCode = (baseCode) => {
   const randomSuffix = Math.floor(1000 + Math.random() * 9000);
   return `${baseCode}.${randomSuffix}`;
@@ -43,6 +43,10 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('photocard')
     .setDescription('🎰 ¡Tira para obtener una photocard aleatoria! (Cooldown: 5 min)'),
+
+  // --- LÍNEA AGREGADA PARA EL RESET ---
+  cooldowns: cooldowns,
+  // -----------------------------------
 
   async execute(interaction) {
     const userId = interaction.user.id;
@@ -78,7 +82,7 @@ module.exports = {
       // 3. Selección aleatoria
       const randomCard = baseCards[Math.floor(Math.random() * baseCards.length)];
       
-      // Determinar nivel de rareza
+      // Determinar nivel numérico de rareza
       let level = randomCard.rarity_level || 1;
       if (!randomCard.rarity_level) {
          if (randomCard.rarity === 'rare') level = 2;
@@ -88,11 +92,13 @@ module.exports = {
       // 4. Generar ID único y Guardar
       const uniqueId = generateUniqueCardCode(randomCard.card_code);
 
+      // Asegurar usuario
       await supabase.from('users').upsert(
         { user_id: userId, username: interaction.user.username },
         { onConflict: 'user_id' }
       );
 
+      // Insertar carta en inventario
       const { error: insertError } = await supabase.from('user_cards').insert({
         user_id: userId,
         card_id: randomCard.id,
@@ -102,42 +108,26 @@ module.exports = {
 
       if (insertError) throw insertError;
 
-      // 5. Construir Embed
+      // 5. Construir Embed con el FORMATO SOLICITADO
       const rConfig = rarityConfig[level];
-
-      // === AQUÍ ESTÁ LA MAGIA PARA LIMPIAR EL NOMBRE ===
-      // Cortamos el nombre usando el separador " — " y nos quedamos con la parte izquierda
-      const cleanName = randomCard.name.split(' — ')[0].trim();
 
       const embed = new EmbedBuilder()
         .setColor(rConfig.color)
         .setTitle('✨ ¡Nueva Photocard Obtenida! ✨')
+        // Aquí está el cambio de formato de texto exacto que pediste:
         .setDescription(
-          `Artist: *${cleanName}* del grupo *${randomCard.group_name || 'Solista'}*\n` +
+          `Artist: *${randomCard.name}* del grupo *${randomCard.group_name || 'Solista'}*\n` +
           `Era: *${randomCard.era || 'Desconocida'}*`
         )
         .addFields(
+          // ID en bloque de código (caja negra pequeña)
           { name: '🎴 ID de Carta', value: `\`${uniqueId}\``, inline: true },
+          // Rareza con fresas
           { name: '🍓 Rareza', value: `${rConfig.display} ${rConfig.name}`, inline: true },
+          // Propietario con mención azul
           { name: '👤 Propietario', value: `<@${userId}>`, inline: true }
         )
         .setImage(randomCard.image_url)
         .setFooter({
           text: 'Usa /inventory para ver tu colección completa',
-          iconURL: interaction.user.displayAvatarURL()
-        })
-        .setTimestamp();
-
-      await interaction.editReply({ embeds: [embed] });
-
-    } catch (error) {
-      console.error('Error en /photocard:', error);
-      cooldowns.delete(userId);
-      await interaction.editReply('❌ Hubo un error al obtener tu carta. Intenta de nuevo.');
-module.exports = {
-  data: new SlashCommandBuilder()..., 
-  cooldowns: cooldowns, // <--- ¡SIN ESTA LÍNEA EL RESET NO FUNCIONA!
-  async execute(interaction) {
-     // ...
-  }
-};
+          iconURL: interaction.user.
