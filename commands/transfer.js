@@ -13,8 +13,17 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY
 );
 
-// Emoji de moneda
+// --- CONFIGURACIÓN EMOJIS ---
 const moneyEmoji = '<:berrycoin:1411737957081288724>';
+const strawberryEmoji = '<:strawberrity:1411384728119939182>'; 
+
+// Helper para estrellas/fresas
+const getRarityEmoji = (level) => {
+  if (level === 1) return strawberryEmoji;
+  if (level === 2) return `${strawberryEmoji}${strawberryEmoji}`;
+  if (level === 3) return `${strawberryEmoji}${strawberryEmoji}${strawberryEmoji}`;
+  return strawberryEmoji;
+};
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -36,14 +45,12 @@ module.exports = {
         .setMinValue(1)
         .setRequired(false)
     )
-    // --- NUEVO CAMPO: PACKS ---
     .addStringOption(opt =>
         opt.setName('pack')
-          .setDescription('Selecciona un pack de tu inventario para transferir (1 unidad)')
+          .setDescription('Selecciona un pack para transferir (1 unidad)')
           .setAutocomplete(true)
           .setRequired(false)
     )
-    // --------------------------
     .addStringOption(opt =>
       opt.setName('groups')
         .setDescription('Transferir TODAS las cartas de un grupo')
@@ -80,18 +87,18 @@ module.exports = {
     const focusName = interaction.options.getFocused(true).name;
     const userId = interaction.user.id;
 
-    // Autocompletado de PACKS (Muestra lo que tienes en inventario)
+    // 1. CORRECCIÓN PACKS: Solo mostramos Nombre y Cantidad (Sin emoji en el label)
     if (focusName === 'pack') {
         const { data: userPacks } = await supabase
             .from('user_packs')
-            .select('quantity, packs(code, name, emoji)')
+            .select('quantity, packs(code, name)') // No traemos emoji aqui para el label
             .eq('user_id', userId)
-            .gt('quantity', 0); // Solo mostrar si tienes más de 0
+            .gt('quantity', 0);
 
         if (!userPacks || userPacks.length === 0) return interaction.respond([]);
 
         const choices = userPacks.map(up => ({
-            name: `${up.packs.emoji} ${up.packs.name} (Tienes: ${up.quantity})`,
+            name: `${up.packs.name} (Tienes: ${up.quantity})`, // Texto limpio
             value: up.packs.code
         }));
 
@@ -128,49 +135,47 @@ module.exports = {
     // Inputs
     const codesInput = interaction.options.getString('codes');
     const moneyAmount = interaction.options.getInteger('money');
-    const packCode = interaction.options.getString('pack'); // Input del pack
+    const packCode = interaction.options.getString('pack');
     const groupFilter = interaction.options.getString('groups');
     const idolFilter = interaction.options.getString('idols');
     const rarityFilter = interaction.options.getInteger('rarity');
     const eraFilter = interaction.options.getString('eras');
     const reason = interaction.options.getString('reason') || 'Sin mensaje adjunto';
 
-    // Validaciones básicas
+    // Validaciones
     if (sender.id === receiver.id) return interaction.reply({ content: '❌ No puedes transferirte cosas a ti mismo.', ephemeral: true });
     if (receiver.bot) return interaction.reply({ content: '❌ No puedes transferirle cosas a un bot.', ephemeral: true });
     
-    // Verificar que haya ALGO seleccionado
     if (!codesInput && !moneyAmount && !packCode && !groupFilter && !idolFilter && !rarityFilter && !eraFilter) {
-      return interaction.reply({ content: '⚠️ Debes especificar qué quieres transferir (dinero, pack, códigos o filtros).', ephemeral: true });
+      return interaction.reply({ content: '⚠️ Debes especificar qué quieres transferir.', ephemeral: true });
     }
 
     try {
       await interaction.deferReply();
 
       // === PASO 1: PRE-CÁLCULO ===
-      
-      let confirmMessage = `Estás a punto de transferir a **${receiver.username}**:\n`;
       let validTransfer = false;
-      
-      // Variables de estado
       let senderMoneyData = null;
-      let packToTransfer = null; // Datos del pack si existe
+      let packToTransfer = null;
       let cardsToTransfer = [];
+      
+      // Variables para el Embed de Confirmación
+      let moneyText = '';
+      let packText = '';
 
-      // A) Verificación de Dinero
+      // A) Dinero
       if (moneyAmount) {
         const { data } = await supabase.from('users').select('balance').eq('user_id', sender.id).single();
         senderMoneyData = data;
         if (!senderMoneyData || senderMoneyData.balance < moneyAmount) {
           return interaction.editReply(`❌ No tienes suficientes ${moneyEmoji} para enviar ${moneyAmount}.`);
         }
-        confirmMessage += `💰 **${moneyAmount}** ${moneyEmoji}\n`;
+        moneyText = `💰 **Dinero:** ${moneyAmount} ${moneyEmoji}\n`;
         validTransfer = true;
       }
 
-      // B) Verificación de Pack
+      // B) Pack
       if (packCode) {
-        // Buscar si el usuario tiene ese pack y traer info del pack
         const { data: userPack } = await supabase
             .from('user_packs')
             .select('id, quantity, packs(name, emoji)')
@@ -181,17 +186,21 @@ module.exports = {
         if (!userPack || userPack.quantity < 1) {
             return interaction.editReply('❌ No tienes ese pack en tu inventario.');
         }
-        
         packToTransfer = userPack;
-        confirmMessage += `🎁 **1 Pack:** ${userPack.packs.emoji} ${userPack.packs.name}\n`;
+        packText = `🎁 **Pack:** ${userPack.packs.emoji} ${userPack.packs.name} (x1)\n`;
         validTransfer = true;
       }
 
-      // C) Verificación de Cartas
+      // C) Cartas
       if (codesInput || groupFilter || idolFilter || rarityFilter || eraFilter) {
         let query = supabase
           .from('user_cards')
-          .select(`id, unique_card_id, base_cards!inner (name, group_name)`)
+          .select(`
+            id, 
+            unique_card_id,
+            rarity, 
+            base_cards!inner (name, group_name, rarity_level)
+          `)
           .eq('user_id', sender.id);
 
         if (codesInput) {
@@ -208,28 +217,55 @@ module.exports = {
         
         if (data && data.length > 0) {
           cardsToTransfer = data;
-          confirmMessage += `🃏 **${data.length} Cartas** (con los filtros seleccionados)\n`;
           validTransfer = true;
         } else if (!validTransfer) {
-          // Si no había dinero ni pack válido y tampoco cartas
           return interaction.editReply('❌ No se encontraron cartas tuyas con esos filtros.');
         }
       }
 
-      if (!validTransfer) {
-        return interaction.editReply('❌ No hay nada válido para transferir.');
-      }
+      if (!validTransfer) return interaction.editReply('❌ No hay nada válido para transferir.');
 
-      // === PASO 2: BOTONES DE CONFIRMACIÓN ===
-
+      // === PASO 2: CONSTRUCCIÓN VISUAL (GRID) ===
+      
       const confirmEmbed = new EmbedBuilder()
         .setColor('#f1c40f')
         .setTitle('⚠️ Confirmar Transferencia')
-        .setDescription(confirmMessage + `\n📝 **Nota:** ${reason}`)
-        .setFooter({ text: 'Tienes 30 segundos para confirmar' });
+        .setDescription(
+            `Estás a punto de transferir a **${receiver}**:\n` +
+            `${moneyText}` +
+            `${packText}` +
+            (cardsToTransfer.length > 0 ? `\n🃏 **Cartas (${cardsToTransfer.length}):**` : '')
+        )
+        .setFooter({ text: 'Tienes 60 segundos para confirmar.' });
 
+      // 3. AGREGAR CAMPOS DE CARTAS (Max 15)
+      if (cardsToTransfer.length > 0) {
+        const maxPreview = 15;
+        const displayCards = cardsToTransfer.slice(0, maxPreview);
+        
+        displayCards.forEach(card => {
+            const cleanName = card.base_cards.name.split(' — ')[0].trim();
+            const rarityEmoji = getRarityEmoji(card.rarity || 1);
+            
+            confirmEmbed.addFields({
+                name: `${cleanName} ${rarityEmoji}`,
+                value: `💎 ${card.base_cards.group_name}\n\`${card.unique_card_id}\``,
+                inline: true // Esto crea el efecto Grid
+            });
+        });
+
+        if (cardsToTransfer.length > maxPreview) {
+            confirmEmbed.addFields({
+                name: '...y más',
+                value: `+${cardsToTransfer.length - maxPreview} cartas adicionales.`,
+                inline: false
+            });
+        }
+      }
+
+      // Botones
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('confirm_transfer').setLabel('Confirmar').setStyle(ButtonStyle.Success).setEmoji('✅'),
+        new ButtonBuilder().setCustomId('confirm_transfer').setLabel('Aceptar').setStyle(ButtonStyle.Success).setEmoji('✅'),
         new ButtonBuilder().setCustomId('cancel_transfer').setLabel('Cancelar').setStyle(ButtonStyle.Danger).setEmoji('✖️')
       );
 
@@ -238,78 +274,67 @@ module.exports = {
       // === PASO 3: CAPTURAR EL CLIC ===
       const collector = message.createMessageComponentCollector({
         componentType: ComponentType.Button,
-        time: 30000,
+        time: 60000, // 60 segundos
         filter: i => i.user.id === sender.id
       });
 
       collector.on('collect', async i => {
         if (i.customId === 'cancel_transfer') {
+          collector.stop('cancelled'); // Paramos collector
           await i.update({ content: '❌ Transferencia cancelada.', embeds: [], components: [] });
           return;
         }
 
         if (i.customId === 'confirm_transfer') {
+          // ¡IMPORTANTÍSIMO! Paramos el collector con razón 'confirmed'
+          // para que no salte el mensaje de "Tiempo agotado".
+          collector.stop('confirmed'); 
+
           // --- EJECUCIÓN ---
-          
-          // 1. Dinero
           if (moneyAmount) {
-            // Restar al sender (usamos el dato fresco o volvemos a consultar por seguridad, aquí usamos lógica simple)
             await supabase.from('users').update({ balance: senderMoneyData.balance - moneyAmount }).eq('user_id', sender.id);
-            
-            // Sumar al receiver
             let { data: rData } = await supabase.from('users').select('balance').eq('user_id', receiver.id).single();
-            if (!rData) {
-               await supabase.from('users').insert({ user_id: receiver.id, username: receiver.username, balance: moneyAmount });
-            } else {
-               await supabase.from('users').update({ balance: rData.balance + moneyAmount }).eq('user_id', receiver.id);
-            }
+            if (!rData) await supabase.from('users').insert({ user_id: receiver.id, username: receiver.username, balance: moneyAmount });
+            else await supabase.from('users').update({ balance: rData.balance + moneyAmount }).eq('user_id', receiver.id);
           }
 
-          // 2. Pack (Solo 1 unidad por ahora)
           if (packToTransfer) {
-             // Restar 1 al sender
              await supabase.from('user_packs').update({ quantity: packToTransfer.quantity - 1 }).eq('id', packToTransfer.id);
-
-             // Sumar 1 al receiver (Upsert)
-             // Primero buscamos si ya tiene
-             const { data: existingRPack } = await supabase.from('user_packs')
-                .select('id, quantity')
-                .eq('user_id', receiver.id)
-                .eq('pack_code', packCode)
-                .single();
-             
+             const { data: existingRPack } = await supabase.from('user_packs').select('id, quantity').eq('user_id', receiver.id).eq('pack_code', packCode).single();
              const newQty = (existingRPack?.quantity || 0) + 1;
-             await supabase.from('user_packs').upsert(
-                { user_id: receiver.id, pack_code: packCode, quantity: newQty },
-                { onConflict: ['user_id', 'pack_code'] }
-             );
+             await supabase.from('user_packs').upsert({ user_id: receiver.id, pack_code: packCode, quantity: newQty }, { onConflict: ['user_id', 'pack_code'] });
           }
 
-          // 3. Cartas
           if (cardsToTransfer.length > 0) {
              const ids = cardsToTransfer.map(c => c.id);
              await supabase.from('user_cards').update({ user_id: receiver.id }).in('id', ids);
           }
 
-          // --- MENSAJE FINAL ---
+          // --- MENSAJE FINAL + PING ---
           const successEmbed = new EmbedBuilder()
             .setColor('#2ecc71')
             .setTitle('✅ Transferencia Completada')
-            .setDescription(`**De:** ${sender}\n**Para:** ${receiver}\n\n${confirmMessage}`)
+            .setDescription(
+                `**De:** ${sender}\n**Para:** ${receiver}\n\n` +
+                (moneyText ? moneyText : '') +
+                (packText ? packText : '') +
+                (cardsToTransfer.length > 0 ? `🃏 **${cardsToTransfer.length} Cartas transferidas**` : '')
+            )
             .addFields({ name: '📝 Mensaje', value: `*${reason}*` })
             .setTimestamp();
 
           await i.update({ 
-            content: `🔔 <@${receiver.id}> ¡Te ha llegado una transferencia!`,
+            content: `🔔 <@${receiver.id}> ¡Te ha llegado una transferencia de ${sender}!`,
             embeds: [successEmbed], 
             components: [] 
           });
         }
       });
 
+      // 2. CORRECCIÓN TIMEOUT: Solo editamos si la razón fue tiempo
       collector.on('end', (_, reason) => {
         if (reason === 'time') {
-          interaction.editReply({ content: '⏳ Tiempo de espera agotado.', components: [] }).catch(() => {});
+          interaction.editReply({ content: '⏳ Tiempo de espera agotado. La transferencia se canceló.', embeds: [], components: [] }).catch(() => {});
         }
       });
 
