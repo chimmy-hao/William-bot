@@ -15,6 +15,10 @@ module.exports = {
     .setName('work')
     .setDescription('💼 Envía a tu idol favorito a trabajar y gana monedas'),
 
+  // --- LÍNEA AGREGADA PARA RESET ---
+  cooldowns: cooldowns,
+  // --------------------------------
+
   async execute(interaction) {
     const userId = interaction.user.id;
     const now = Date.now();
@@ -83,11 +87,7 @@ module.exports = {
     } catch (err) {
       console.error('Error en /work:', err);
       await interaction.editReply('❌ Hubo un error al ejecutar /work.');
-module.exports = {
-  data: new SlashCommandBuilder()..., 
-  cooldowns: cooldowns, // <--- ¡SIN ESTA LÍNEA EL RESET NO FUNCIONA!
-  async execute(interaction) {
-     // ...
+    }
   }
 };
 
