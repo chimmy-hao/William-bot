@@ -13,7 +13,7 @@ const missingEmoji = '<:strawberritymissing:1441239270626164847>'; // Fresa gris
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('checklist')
-    .setDescription('📝 Mira qué cartas te faltan para completar tu colección')
+    .setDescription('📝 Mira el progreso de tu colección')
     .addUserOption(opt => 
       opt.setName('user')
         .setDescription('¿La checklist de quién quieres ver?')
@@ -44,7 +44,6 @@ module.exports = {
 
     if (focused.name === 'idol') {
       const { data: idols } = await supabase.from('base_cards').select('name');
-      // Limpiamos nombres para el buscador
       const uniqueIdols = [...new Set(idols.map(i => i.name.split(' — ')[0].trim()))];
       const filtered = uniqueIdols.filter(n => n.toLowerCase().includes(focused.value.toLowerCase())).slice(0, 25);
       return interaction.respond(filtered.map(n => ({ name: n, value: n })));
@@ -83,7 +82,7 @@ module.exports = {
         return interaction.editReply('❌ No se encontraron cartas con esos filtros.');
       }
 
-      // 2. Obtener las cartas que TIENE el usuario (Lo que POSEE)
+      // 2. Obtener las cartas que TIENE el usuario
       const baseIds = allCards.map(c => c.id);
       const { data: ownedCards, error: ownedError } = await supabase
         .from('user_cards')
@@ -96,6 +95,7 @@ module.exports = {
         return interaction.editReply('❌ Error al consultar tu colección.');
       }
 
+      // "new Set" elimina duplicados. ownedSet.size es la cantidad de cartas ÚNICAS que tienes.
       const ownedSet = new Set(ownedCards.map(uc => uc.card_id));
 
       // 3. PROCESAR DATOS
@@ -118,7 +118,7 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setColor('#ff9ff3')
         .setAuthor({ 
-          name: `${targetUser.username}'s Checklist`, 
+          name: `Checklist de ${targetUser.username}`, 
           iconURL: targetUser.displayAvatarURL() 
         })
         .setTimestamp();
@@ -132,7 +132,6 @@ module.exports = {
 
         const lines = [];
         for (const [idolName, rarities] of Object.entries(idols)) {
-          // Aquí usamos tus emojis
           const r1 = rarities[1] ? ownedEmoji : missingEmoji;
           const r2 = rarities[2] ? ownedEmoji : missingEmoji;
           const r3 = rarities[3] ? ownedEmoji : missingEmoji;
@@ -150,13 +149,13 @@ module.exports = {
         }
       }
 
-      // Pie de página
-      const totalBase = allCards.length;
-      const totalOwned = ownedCards.length;
-      const percent = Math.round((totalOwned / totalBase) * 100);
+      // 5. CÁLCULO DEL PROGRESO (Sin duplicados)
+      const totalSlots = allCards.length; // Total de huecos en el álbum
+      const filledSlots = ownedSet.size; // Total de huecos llenos (únicos)
+      const percent = Math.round((filledSlots / totalSlots) * 100);
 
       embed.setFooter({ 
-        text: `Progreso: ${totalOwned}/${totalBase} (${percent}%) • ${ownedEmoji}=Tienes • ${missingEmoji}=Falta` 
+        text: `Progreso: ${percent}%` 
       });
 
       await interaction.editReply({ embeds: [embed] });
