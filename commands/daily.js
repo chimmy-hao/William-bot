@@ -26,6 +26,10 @@ module.exports = {
     .setName('daily')
     .setDescription('📅 Reclama tu recompensa diaria (Cada 12 horas)'),
 
+  // --- LÍNEA AGREGADA PARA EL RESET ---
+  cooldowns: cooldowns,
+  // -----------------------------------
+
   async execute(interaction) {
     const userId = interaction.user.id;
     const now = Date.now();
@@ -107,20 +111,3 @@ module.exports = {
         .setTitle('📅 Recompensa Diaria')
         .setDescription(
           `Por ayudarlo a planear su cita con Est, William te otorga **${REWARD_AMOUNT}** ${moneyEmoji} y la carta \`${uniqueCode}\`.` +
-          `\n\n🃏 **Carta recibida:** ${randomCard.name}`
-        )
-        .setImage('attachment://daily.gif') // Referencia al archivo adjunto
-        .setTimestamp();
-
-      await interaction.editReply({ embeds: [embed], files: [file] });
-
-    } catch (error) {
-      console.error('Error en daily:', error);
-      await interaction.editReply('❌ Hubo un error al reclamar tu recompensa diaria.');
-module.exports = {
-  data: new SlashCommandBuilder()..., 
-  cooldowns: cooldowns, // <--- ¡SIN ESTA LÍNEA EL RESET NO FUNCIONA!
-  async execute(interaction) {
-     // ...
-  }
-};
