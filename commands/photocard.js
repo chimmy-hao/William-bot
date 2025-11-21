@@ -10,7 +10,7 @@ const supabase = createClient(
 // --- CONFIGURACIÓN ---
 const strawberryEmoji = '<:strawberrity:1411384728119939182>';
 
-// Configuración visual por nivel de rareza (Usando Fresas)
+// Configuración visual por nivel de rareza
 const rarityConfig = {
   1: { 
     display: `${strawberryEmoji}`, 
@@ -33,7 +33,7 @@ const rarityConfig = {
 const cooldowns = new Map();
 const COOLDOWN_TIME = 5 * 60 * 1000; // 5 minutos
 
-// Generador de ID único (Ej: WMO.1234)
+// Generador de ID único
 const generateUniqueCardCode = (baseCode) => {
   const randomSuffix = Math.floor(1000 + Math.random() * 9000);
   return `${baseCode}.${randomSuffix}`;
@@ -44,9 +44,8 @@ module.exports = {
     .setName('photocard')
     .setDescription('🎰 ¡Tira para obtener una photocard aleatoria! (Cooldown: 5 min)'),
 
-  // --- LÍNEA PARA EL RESET ---
+  // LÍNEA IMPORTANTE PARA EL RESET
   cooldowns: cooldowns,
-  // -------------------------
 
   async execute(interaction) {
     const userId = interaction.user.id;
@@ -82,7 +81,7 @@ module.exports = {
       // 3. Selección aleatoria
       const randomCard = baseCards[Math.floor(Math.random() * baseCards.length)];
       
-      // Determinar nivel numérico de rareza
+      // Determinar nivel de rareza
       let level = randomCard.rarity_level || 1;
       if (!randomCard.rarity_level) {
          if (randomCard.rarity === 'rare') level = 2;
@@ -92,13 +91,11 @@ module.exports = {
       // 4. Generar ID único y Guardar
       const uniqueId = generateUniqueCardCode(randomCard.card_code);
 
-      // Asegurar usuario
       await supabase.from('users').upsert(
         { user_id: userId, username: interaction.user.username },
         { onConflict: 'user_id' }
       );
 
-      // Insertar carta en inventario
       const { error: insertError } = await supabase.from('user_cards').insert({
         user_id: userId,
         card_id: randomCard.id,
@@ -108,14 +105,18 @@ module.exports = {
 
       if (insertError) throw insertError;
 
-      // 5. Construir Embed con el FORMATO SOLICITADO
+      // 5. Construir Embed
       const rConfig = rarityConfig[level];
+
+      // === CORRECCIÓN DE NOMBRE (CLEAN NAME) ===
+      // Cortamos en el guion " — " y tomamos solo la primera parte
+      const cleanName = randomCard.name.split(' — ')[0].trim();
 
       const embed = new EmbedBuilder()
         .setColor(rConfig.color)
         .setTitle('✨ ¡Nueva Photocard Obtenida! ✨')
         .setDescription(
-          `Artist: *${randomCard.name}* del grupo *${randomCard.group_name || 'Solista'}*\n` +
+          `Artist: *${cleanName}* del grupo *${randomCard.group_name || 'Solista'}*\n` +
           `Era: *${randomCard.era || 'Desconocida'}*`
         )
         .addFields(
@@ -134,7 +135,7 @@ module.exports = {
 
     } catch (error) {
       console.error('Error en /photocard:', error);
-      cooldowns.delete(userId); // Resetear cooldown si falla
+      cooldowns.delete(userId);
       await interaction.editReply('❌ Hubo un error al obtener tu carta. Intenta de nuevo.');
     }
   }
