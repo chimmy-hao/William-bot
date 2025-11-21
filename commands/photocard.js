@@ -134,6 +134,10 @@ module.exports = {
       console.error('Error en /photocard:', error);
       cooldowns.delete(userId);
       await interaction.editReply('❌ Hubo un error al obtener tu carta. Intenta de nuevo.');
-    }
+module.exports = {
+  data: new SlashCommandBuilder()..., 
+  cooldowns: cooldowns, // <--- ¡SIN ESTA LÍNEA EL RESET NO FUNCIONA!
+  async execute(interaction) {
+     // ...
   }
 };
