@@ -13,8 +13,9 @@ const supabase = createClient(
 
 // --- CONFIGURACIÓN ---
 const strawberryEmoji = '<:strawberrity:1411384728119939182>'; 
-// ID del Bot para transferirle las cartas "quemadas"
-// Asegúrate de que CLIENT_ID esté en tu archivo .env
+
+// ID del Bot (Asegúrate de tener CLIENT_ID en tus variables de entorno)
+// Si no hay variable, usa un ID placeholder (pero asegúrate de que sea numérico si tu DB lo exige)
 const BOT_ID = process.env.CLIENT_ID; 
 
 // Helper para generar ID
@@ -91,13 +92,17 @@ module.exports = {
       return interaction.reply({ content: '⚠️ Debes usar el **Modo Manual** (escribiendo 10 códigos) o el **Modo Auto** (seleccionando Rareza e Idol).', ephemeral: true });
     }
 
+    // Verificación crítica: Si no hay CLIENT_ID configurado, avisar
+    if (!BOT_ID) {
+        return interaction.reply({ content: '❌ Error de configuración: Falta la variable `CLIENT_ID` en el servidor para poder recibir las cartas quemadas.', ephemeral: true });
+    }
+
     try {
       await interaction.deferReply();
 
       let cardsToConsume = [];
-      let baseCardReference = null; // Para saber qué idol/era es
 
-      // --- MODO 1: MANUAL (Códigos específicos) ---
+      // --- MODO 1: MANUAL ---
       if (codesInput) {
         const codesArr = [...new Set(codesInput.split(/[\s,]+/).filter(c => c))];
         
@@ -118,13 +123,13 @@ module.exports = {
         cardsToConsume = foundCards;
       } 
       
-      // --- MODO 2: AUTO (Busca 10 cartas iguales) ---
+      // --- MODO 2: AUTO ---
       else {
         let query = supabase
           .from('user_cards')
           .select(`id, unique_card_id, rarity, base_cards!inner (id, name, group_name, era, rarity_level, image_url, card_code)`)
           .eq('user_id', userId)
-          .eq('rarity', targetRarityBase); // Filtra por la rareza que quiere subir
+          .eq('rarity', targetRarityBase);
 
         if (idolFilter) query = query.ilike('base_cards.name', `%${idolFilter}%`);
         if (groupFilter) query = query.ilike('base_cards.group_name', `%${groupFilter}%`);
@@ -135,8 +140,7 @@ module.exports = {
           return interaction.editReply(`❌ No tienes suficientes cartas (Rareza ${targetRarityBase}) con esos filtros para realizar un Level Up. Necesitas 10.`);
         }
 
-        // AGRUPAR: Necesitamos 10 cartas que sean del MISMO "tipo" (Mismo Idol + Misma Era)
-        // No podemos mezclar Eras diferentes para subir de nivel.
+        // AGRUPAR
         const groups = {};
         for (const c of potentialCards) {
             const key = `${c.base_cards.name}_${c.base_cards.era}`;
@@ -144,24 +148,22 @@ module.exports = {
             groups[key].push(c);
         }
 
-        // Buscar si algún grupo tiene 10 o más
         let validGroup = null;
         for (const key in groups) {
             if (groups[key].length >= 10) {
-                validGroup = groups[key].slice(0, 10); // Tomamos solo 10
+                validGroup = groups[key].slice(0, 10);
                 break;
             }
         }
 
         if (!validGroup) {
-            return interaction.editReply('❌ Tienes cartas, pero no completas 10 del **mismo Idol y misma Era**. No se pueden mezclar Eras.');
+            return interaction.editReply('❌ Tienes cartas, pero no completas 10 del **mismo Idol y misma Era**.');
         }
 
         cardsToConsume = validGroup;
       }
 
-      // --- VALIDACIÓN FINAL DE LAS CARTAS A CONSUMIR ---
-      // Verificar que todas sean la misma rareza e idol/era
+      // --- VALIDACIÓN FINAL ---
       const firstCard = cardsToConsume[0];
       const currentRarity = firstCard.rarity;
       const currentEra = firstCard.base_cards.era;
@@ -179,13 +181,12 @@ module.exports = {
       }
 
       if (currentRarity >= 3) {
-        return interaction.editReply('❌ Las cartas de Rareza 3 (Legendarias) ya están en el nivel máximo. No se pueden subir más.');
+        return interaction.editReply('❌ Las cartas de Rareza 3 (Legendarias) ya están en el nivel máximo.');
       }
 
-      // --- BUSCAR LA CARTA TARGET (Siguiente Nivel) ---
+      // --- BUSCAR TARGET ---
       const nextRarity = currentRarity + 1;
       
-      // Buscamos en la base de datos la carta que coincida en Nombre, Grupo, Era pero tenga la Rareza +1
       const { data: targetBaseCard, error: targetError } = await supabase
         .from('base_cards')
         .select('*')
@@ -201,22 +202,27 @@ module.exports = {
 
       // --- EJECUCIÓN (BURN & MINT) ---
       
-      // 1. Transferir las 10 cartas viejas al BOT (Quemar)
+      // 1. ¡SOLUCIÓN AL PROBLEMA! Asegurar que el BOT exista en la tabla 'users'
+      await supabase.from('users').upsert({ 
+          user_id: BOT_ID, 
+          username: 'William Bot (System)', 
+          balance: 0 
+      });
+
+      // 2. Ahora sí, transferir las cartas al bot
       const idsToBurn = cardsToConsume.map(c => c.id);
-      // Si no tienes configurado el BOT_ID, usa una string dummy como 'SYSTEM_BURN'
-      const burnDestination = BOT_ID || 'SYSTEM_BURN'; 
 
       const { error: burnError } = await supabase
         .from('user_cards')
-        .update({ user_id: burnDestination })
+        .update({ user_id: BOT_ID })
         .in('id', idsToBurn);
 
       if (burnError) {
         console.error(burnError);
-        return interaction.editReply('❌ Error crítico al consumir las cartas.');
+        return interaction.editReply('❌ Error crítico al transferir las cartas al bot.');
       }
 
-      // 2. Crear la nueva carta (Mint)
+      // 3. Crear la nueva carta
       const newUniqueId = generateUniqueCardCode(targetBaseCard.card_code);
       
       const { error: mintError } = await supabase
@@ -230,57 +236,58 @@ module.exports = {
 
       if (mintError) {
         console.error(mintError);
-        return interaction.editReply('❌ Error al crear la nueva carta (Las cartas viejas ya fueron consumidas, contacta al admin).');
+        return interaction.editReply('❌ Error al crear la nueva carta.');
       }
 
-      // --- VISUALIZACIÓN (CANVAS) ---
-      const canvas = createCanvas(400, 500);
-      const ctx = canvas.getContext('2d');
-
+      // --- VISUALIZACIÓN ---
+      let attachment = null;
       try {
         const img = await loadImage(targetBaseCard.image_url);
-        // Dibujar carta centrada con bordes redondeados
-        const x = 50;
-        const y = 50;
-        const w = 300;
-        const h = 400;
-        const radius = 20;
+        
+        const canvas = createCanvas(img.width, img.height);
+        const ctx = canvas.getContext('2d');
+        const radius = 20; 
 
         ctx.beginPath();
-        ctx.moveTo(x + radius, y);
-        ctx.lineTo(x + w - radius, y);
-        ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-        ctx.lineTo(x + w, y + h - radius);
-        ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-        ctx.lineTo(x + radius, y + h);
-        ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-        ctx.lineTo(x, y + radius);
-        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.moveTo(radius, 0);
+        ctx.lineTo(img.width - radius, 0);
+        ctx.quadraticCurveTo(img.width, 0, img.width, radius);
+        ctx.lineTo(img.width, img.height - radius);
+        ctx.quadraticCurveTo(img.width, img.height, img.width - radius, img.height);
+        ctx.lineTo(radius, img.height);
+        ctx.quadraticCurveTo(0, img.height, 0, img.height - radius);
+        ctx.lineTo(0, radius);
+        ctx.quadraticCurveTo(0, 0, radius, 0);
         ctx.closePath();
-        ctx.clip();
-        ctx.drawImage(img, x, y, w, h);
+        ctx.clip(); 
+
+        ctx.drawImage(img, 0, 0); 
         
+        attachment = new AttachmentBuilder(await canvas.encode('png'), { name: 'levelup.png' });
       } catch (e) {
         console.error("Error cargando imagen canvas", e);
       }
 
-      const attachment = new AttachmentBuilder(await canvas.encode('png'), { name: 'levelup.png' });
-      
       const cleanName = targetBaseCard.name.split(' — ')[0].trim();
       const oldEmoji = getRarityEmoji(currentRarity);
       const newEmoji = getRarityEmoji(nextRarity);
 
       const embed = new EmbedBuilder()
-        .setColor('#9b59b6') // Violeta místico de upgrade
+        .setColor('#9b59b6')
         .setTitle('✨ ¡LEVEL UP COMPLETADO! ✨')
         .setDescription(
             `Has combinado **10 cartas** de ${cleanName} (${oldEmoji}) para obtener su versión superior.` +
             `\n\n🔥 **Cartas consumidas:** 10\n🌟 **Nueva Rareza:** ${newEmoji}\n🆔 **Nuevo Código:** \`${newUniqueId}\``
         )
-        .setImage('attachment://levelup.png')
         .setFooter({ text: 'Las cartas usadas han sido removidas de tu inventario.' });
 
-      await interaction.editReply({ embeds: [embed], files: [attachment] });
+      if (attachment) {
+        embed.setImage('attachment://levelup.png');
+        await interaction.editReply({ embeds: [embed], files: [attachment] });
+      } else {
+        embed.setImage(targetBaseCard.image_url);
+        await interaction.editReply({ embeds: [embed] });
+      }
 
     } catch (err) {
       console.error('Error en level_up:', err);
