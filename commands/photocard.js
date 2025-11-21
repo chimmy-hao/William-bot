@@ -1,5 +1,6 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
+const { createCanvas, loadImage } = require('@napi-rs/canvas'); // Necesario para el borde 15px
 
 // Conexión a Supabase
 const supabase = createClient(
@@ -9,6 +10,13 @@ const supabase = createClient(
 
 // --- CONFIGURACIÓN ---
 const strawberryEmoji = '<:strawberrity:1411384728119939182>';
+
+// Probabilidades (Suman 100%)
+const DROP_RATES = {
+  1: 70, // 70% Probabilidad de Rareza 1
+  2: 25, // 25% Probabilidad de Rareza 2
+  3: 5   // 5%  Probabilidad de Rareza 3
+};
 
 // Configuración visual por nivel de rareza
 const rarityConfig = {
@@ -39,12 +47,20 @@ const generateUniqueCardCode = (baseCode) => {
   return `${baseCode}.${randomSuffix}`;
 };
 
+// Función para determinar rareza basada en porcentajes
+const rollRarity = () => {
+  const roll = Math.random() * 100; // Número entre 0 y 100
+  if (roll < DROP_RATES[1]) return 1; // 0 a 70
+  if (roll < DROP_RATES[1] + DROP_RATES[2]) return 2; // 70 a 95
+  return 3; // 95 a 100
+};
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('photocard')
     .setDescription('🎰 ¡Tira para obtener una photocard aleatoria! (Cooldown: 5 min)'),
 
-  // LÍNEA IMPORTANTE PARA EL RESET
+  // LÍNEA PARA EL RESET
   cooldowns: cooldowns,
 
   async execute(interaction) {
@@ -68,27 +84,39 @@ module.exports = {
     try {
       await interaction.deferReply();
 
-      // 2. Obtener cartas base
-      const { data: baseCards, error: fetchError } = await supabase
-        .from('base_cards')
-        .select('*');
+      // 2. Determinar Rareza (RNG Ponderado)
+      let targetRarity = rollRarity();
 
-      if (fetchError || !baseCards || baseCards.length === 0) {
-        console.error('Error base_cards:', fetchError);
-        return interaction.editReply('❌ No hay cartas disponibles en la base de datos.');
+      // 3. Buscar cartas de esa rareza específica
+      // Nota: Si por casualidad no hay cartas de rareza 3 en la DB, hacemos fallback a rareza 1
+      let { data: candidateCards, error: fetchError } = await supabase
+        .from('base_cards')
+        .select('*')
+        .eq('rarity_level', targetRarity);
+
+      // Si falló o no hay cartas de esa rareza, buscamos cualquiera (fallback de seguridad)
+      if (fetchError || !candidateCards || candidateCards.length === 0) {
+        const { data: backupCards } = await supabase.from('base_cards').select('*');
+        candidateCards = backupCards;
+        if (!candidateCards || candidateCards.length === 0) {
+            return interaction.editReply('❌ Error crítico: No hay cartas en la base de datos.');
+        }
+        // Recalcular rareza basada en la carta que salga del backup
+        targetRarity = null; 
       }
 
-      // 3. Selección aleatoria
-      const randomCard = baseCards[Math.floor(Math.random() * baseCards.length)];
+      // 4. Elegir carta aleatoria del grupo filtrado
+      const randomCard = candidateCards[Math.floor(Math.random() * candidateCards.length)];
       
-      // Determinar nivel de rareza
-      let level = randomCard.rarity_level || 1;
-      if (!randomCard.rarity_level) {
+      // Asegurar nivel de rareza correcto
+      let level = targetRarity || randomCard.rarity_level || 1;
+      // Fallback manual si rarity_level no estaba seteado en DB
+      if (!randomCard.rarity_level && !targetRarity) {
          if (randomCard.rarity === 'rare') level = 2;
          if (randomCard.rarity === 'legendary') level = 3;
       }
 
-      // 4. Generar ID único y Guardar
+      // 5. Generar ID único y Guardar
       const uniqueId = generateUniqueCardCode(randomCard.card_code);
 
       await supabase.from('users').upsert(
@@ -105,11 +133,40 @@ module.exports = {
 
       if (insertError) throw insertError;
 
-      // 5. Construir Embed
-      const rConfig = rarityConfig[level];
+      // 6. PROCESAMIENTO DE IMAGEN (Canvas - Bordes 15px)
+      let attachment = null;
+      try {
+        const img = await loadImage(randomCard.image_url);
+        // Usamos el tamaño original de la imagen
+        const canvas = createCanvas(img.width, img.height);
+        const ctx = canvas.getContext('2d');
+        
+        const radius = 15; // Radio solicitado
 
-      // === CORRECCIÓN DE NOMBRE (CLEAN NAME) ===
-      // Cortamos en el guion " — " y tomamos solo la primera parte
+        // Dibujar forma redondeada
+        ctx.beginPath();
+        ctx.moveTo(radius, 0);
+        ctx.lineTo(img.width - radius, 0);
+        ctx.quadraticCurveTo(img.width, 0, img.width, radius);
+        ctx.lineTo(img.width, img.height - radius);
+        ctx.quadraticCurveTo(img.width, img.height, img.width - radius, img.height);
+        ctx.lineTo(radius, img.height);
+        ctx.quadraticCurveTo(0, img.height, 0, img.height - radius);
+        ctx.lineTo(0, radius);
+        ctx.quadraticCurveTo(0, 0, radius, 0);
+        ctx.closePath();
+        ctx.clip(); // Recortar
+
+        ctx.drawImage(img, 0, 0);
+        
+        attachment = new AttachmentBuilder(await canvas.encode('png'), { name: 'drop.png' });
+      } catch (err) {
+        console.error('Error procesando imagen canvas:', err);
+        // Si falla canvas, enviamos sin imagen o url directa en embed (fallback)
+      }
+
+      // 7. Construir Embed
+      const rConfig = rarityConfig[level];
       const cleanName = randomCard.name.split(' — ')[0].trim();
 
       const embed = new EmbedBuilder()
@@ -124,14 +181,19 @@ module.exports = {
           { name: '🍓 Rareza', value: `${rConfig.display} ${rConfig.name}`, inline: true },
           { name: '👤 Propietario', value: `<@${userId}>`, inline: true }
         )
-        .setImage(randomCard.image_url)
         .setFooter({
           text: 'Usa /inventory para ver tu colección completa',
           iconURL: interaction.user.displayAvatarURL()
         })
         .setTimestamp();
 
-      await interaction.editReply({ embeds: [embed] });
+      if (attachment) {
+        embed.setImage('attachment://drop.png');
+        await interaction.editReply({ embeds: [embed], files: [attachment] });
+      } else {
+        embed.setImage(randomCard.image_url); // Fallback si canvas falla
+        await interaction.editReply({ embeds: [embed] });
+      }
 
     } catch (error) {
       console.error('Error en /photocard:', error);
