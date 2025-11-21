@@ -119,9 +119,3 @@ module.exports = {
     }
   }
 };
-
-      const embed = new EmbedBuilder()
-        .setColor('#e84393') // Un color rosado/rojizo romántico
-        .setTitle('📅 Recompensa Diaria')
-        .setDescription(
-          `Por ayudarlo a planear su cita con Est, William te otorga **${REWARD_AMOUNT}** ${moneyEmoji} y la carta \`${uniqueCode}\`.` +
