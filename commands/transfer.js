@@ -87,18 +87,18 @@ module.exports = {
     const focusName = interaction.options.getFocused(true).name;
     const userId = interaction.user.id;
 
-    // 1. CORRECCIÓN PACKS: Solo mostramos Nombre y Cantidad (Sin emoji en el label)
+    // Autocompletado de PACKS
     if (focusName === 'pack') {
         const { data: userPacks } = await supabase
             .from('user_packs')
-            .select('quantity, packs(code, name)') // No traemos emoji aqui para el label
+            .select('quantity, packs(code, name)') 
             .eq('user_id', userId)
             .gt('quantity', 0);
 
         if (!userPacks || userPacks.length === 0) return interaction.respond([]);
 
         const choices = userPacks.map(up => ({
-            name: `${up.packs.name} (Tienes: ${up.quantity})`, // Texto limpio
+            name: `${up.packs.name} (Tienes: ${up.quantity})`, 
             value: up.packs.code
         }));
 
@@ -159,7 +159,6 @@ module.exports = {
       let packToTransfer = null;
       let cardsToTransfer = [];
       
-      // Variables para el Embed de Confirmación
       let moneyText = '';
       let packText = '';
 
@@ -249,8 +248,9 @@ module.exports = {
             
             confirmEmbed.addFields({
                 name: `${cleanName} ${rarityEmoji}`,
-                value: `💎 ${card.base_cards.group_name}\n\`${card.unique_card_id}\``,
-                inline: true // Esto crea el efecto Grid
+                // CAMBIO: Eliminado el diamante 💎 de aquí
+                value: `${card.base_cards.group_name}\n\`${card.unique_card_id}\``,
+                inline: true 
             });
         });
 
@@ -274,20 +274,18 @@ module.exports = {
       // === PASO 3: CAPTURAR EL CLIC ===
       const collector = message.createMessageComponentCollector({
         componentType: ComponentType.Button,
-        time: 60000, // 60 segundos
+        time: 60000,
         filter: i => i.user.id === sender.id
       });
 
       collector.on('collect', async i => {
         if (i.customId === 'cancel_transfer') {
-          collector.stop('cancelled'); // Paramos collector
+          collector.stop('cancelled'); 
           await i.update({ content: '❌ Transferencia cancelada.', embeds: [], components: [] });
           return;
         }
 
         if (i.customId === 'confirm_transfer') {
-          // ¡IMPORTANTÍSIMO! Paramos el collector con razón 'confirmed'
-          // para que no salte el mensaje de "Tiempo agotado".
           collector.stop('confirmed'); 
 
           // --- EJECUCIÓN ---
@@ -310,7 +308,7 @@ module.exports = {
              await supabase.from('user_cards').update({ user_id: receiver.id }).in('id', ids);
           }
 
-          // --- MENSAJE FINAL + PING ---
+          // --- MENSAJE FINAL ---
           const successEmbed = new EmbedBuilder()
             .setColor('#2ecc71')
             .setTitle('✅ Transferencia Completada')
@@ -331,7 +329,6 @@ module.exports = {
         }
       });
 
-      // 2. CORRECCIÓN TIMEOUT: Solo editamos si la razón fue tiempo
       collector.on('end', (_, reason) => {
         if (reason === 'time') {
           interaction.editReply({ content: '⏳ Tiempo de espera agotado. La transferencia se canceló.', embeds: [], components: [] }).catch(() => {});
