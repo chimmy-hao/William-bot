@@ -233,19 +233,19 @@ module.exports = {
         });
 
       if (mintError) {
-        // Si falla dar la nueva carta, sería ideal devolver las viejas, pero es complejo.
         console.error(mintError);
         return interaction.editReply('❌ Hubo un error al entregar tu nueva carta. Contacta a soporte.');
       }
 
-      // --- VISUALIZACIÓN ---
+      // --- VISUALIZACIÓN (CANVAS 15px) ---
       let attachment = null;
       try {
         const img = await loadImage(targetBaseCard.image_url);
         
         const canvas = createCanvas(img.width, img.height);
         const ctx = canvas.getContext('2d');
-        const radius = 20; 
+        // CAMBIO: Radio de 15px
+        const radius = 15; 
 
         ctx.beginPath();
         ctx.moveTo(radius, 0);
