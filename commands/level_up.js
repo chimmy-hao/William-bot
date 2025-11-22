@@ -13,8 +13,9 @@ const supabase = createClient(
 
 // --- CONFIGURACIÓN ---
 const strawberryEmoji = '<:strawberrity:1411384728119939182>'; 
-// ID del Bot al que se enviarán las cartas consumidas
-const BOT_ID = 1411218644163231804; 
+
+// ID DEL BOT (Debe estar en tus variables de entorno en Render como CLIENT_ID)
+const BOT_ID = process.env.CLIENT_ID; 
 
 // Helper para generar ID
 const generateUniqueCardCode = (baseCode) => {
@@ -85,13 +86,13 @@ module.exports = {
     const idolFilter = interaction.options.getString('idol');
     const groupFilter = interaction.options.getString('group');
 
-    // Validación inicial
     if (!codesInput && (!targetRarityBase || !idolFilter)) {
       return interaction.reply({ content: '⚠️ Debes usar el **Modo Manual** (escribiendo 10 códigos) o el **Modo Auto** (seleccionando Rareza e Idol).', ephemeral: true });
     }
 
+    // Verificación crítica: Si no hay CLIENT_ID configurado, avisar
     if (!BOT_ID) {
-        return interaction.reply({ content: '❌ Error interno: Falta configurar la variable `CLIENT_ID` en Render.', ephemeral: true });
+        return interaction.reply({ content: '❌ Error de configuración: Falta la variable `CLIENT_ID` en Render para el Pool de Cartas.', ephemeral: true });
     }
 
     try {
@@ -137,7 +138,6 @@ module.exports = {
           return interaction.editReply(`❌ No tienes suficientes cartas (Rareza ${targetRarityBase}) con esos filtros para realizar un Level Up. Necesitas 10.`);
         }
 
-        // AGRUPAR (Mismo Idol + Misma Era)
         const groups = {};
         for (const c of potentialCards) {
             const key = `${c.base_cards.name}_${c.base_cards.era}`;
@@ -181,7 +181,6 @@ module.exports = {
         return interaction.editReply('❌ Las cartas de Rareza 3 (Legendarias) ya están en el nivel máximo.');
       }
 
-      // --- BUSCAR TARGET ---
       const nextRarity = currentRarity + 1;
       
       const { data: targetBaseCard, error: targetError } = await supabase
@@ -197,22 +196,30 @@ module.exports = {
         return interaction.editReply(`❌ Error: No existe una versión de **Rareza ${nextRarity}** para esta carta en la base de datos.`);
       }
 
-      // --- EJECUCIÓN (BURN & MINT) ---
+      // --- EJECUCIÓN (TRANSFER TO BOT POOL & MINT) ---
       
-      // 1. Transferir al BOT (Ahora funcionará porque el bot ya existe en DB)
+      // 1. ASEGURAR QUE EL BOT EXISTA EN LA DB
+      // Esto evita el error de Foreign Key Constraint
+      await supabase.from('users').upsert({ 
+          user_id: BOT_ID, 
+          username: 'William Bot (Pool)', 
+          balance: 0 
+      });
+
+      // 2. TRANSFERIR CARTAS AL BOT
       const idsToBurn = cardsToConsume.map(c => c.id);
 
-      const { error: burnError } = await supabase
+      const { error: transferError } = await supabase
         .from('user_cards')
-        .update({ user_id: BOT_ID })
+        .update({ user_id: BOT_ID }) // Se las damos al bot
         .in('id', idsToBurn);
 
-      if (burnError) {
-        console.error(burnError);
-        return interaction.editReply('❌ Error crítico al transferir las cartas al bot.');
+      if (transferError) {
+        console.error(transferError);
+        return interaction.editReply('❌ Error crítico al transferir las cartas al Pool del Bot.');
       }
 
-      // 2. Crear nueva carta
+      // 3. CREAR NUEVA CARTA
       const newUniqueId = generateUniqueCardCode(targetBaseCard.card_code);
       
       const { error: mintError } = await supabase
@@ -269,7 +276,7 @@ module.exports = {
             `Has combinado **10 cartas** de ${cleanName} (${oldEmoji}) para obtener su versión superior.` +
             `\n\n🔥 **Cartas consumidas:** 10\n🌟 **Nueva Rareza:** ${newEmoji}\n🆔 **Nuevo Código:** \`${newUniqueId}\``
         )
-        .setFooter({ text: 'Las cartas usadas han sido removidas de tu inventario.' });
+        .setFooter({ text: 'Las cartas usadas se han enviado al Pool del Bot.' });
 
       if (attachment) {
         embed.setImage('attachment://levelup.png');
