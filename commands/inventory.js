@@ -12,8 +12,9 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY
 );
 
-// Emojis
+// Emoji de fresa
 const strawberryEmoji = '<:strawberrity:1411384728119939182>';
+// Emoji NFT
 const nftEmoji = '<:nft:1441792691787792566>';
 
 // Configuración de rareza
@@ -90,63 +91,40 @@ module.exports = {
     const focusName = focusedOption.name;
     const userValue = focusedOption.value.toLowerCase();
 
-    // Valores ya seleccionados para filtrar dinámicamente
     const selectedGroup = interaction.options.getString('group');
     const selectedIdol = interaction.options.getString('idol');
 
-    // --- AUTOCOMPLETADO DE GRUPOS ---
+    // AUTOCOMPLETADO DE GRUPOS
     if (focusName === 'group') {
       let query = supabase.from('base_cards').select('group_name').not('group_name', 'is', null);
-      
-      if (selectedIdol) {
-        query = query.ilike('name', `%${selectedIdol}%`);
-      }
-
+      if (selectedIdol) query = query.ilike('name', `%${selectedIdol}%`);
       const { data: groups } = await query;
       if (!groups) return interaction.respond([]);
-
       const uniqueGroups = [...new Set(groups.map(g => g.group_name))];
-      const filtered = uniqueGroups
-        .filter(g => g.toLowerCase().includes(userValue))
-        .slice(0, 25);
-        
+      const filtered = uniqueGroups.filter(g => g.toLowerCase().includes(userValue)).slice(0, 25);
       return interaction.respond(filtered.map(g => ({ name: g, value: g })));
     }
 
-    // --- AUTOCOMPLETADO DE IDOLS ---
+    // AUTOCOMPLETADO DE IDOLS
     if (focusName === 'idol') {
       let query = supabase.from('base_cards').select('name');
-
-      if (selectedGroup) {
-        query = query.eq('group_name', selectedGroup);
-      }
-
+      if (selectedGroup) query = query.eq('group_name', selectedGroup);
       const { data: idols } = await query;
       if (!idols) return interaction.respond([]);
-
       const uniqueIdols = [...new Set(idols.map(i => i.name.split(' — ')[0].trim()))];
-      const filtered = uniqueIdols
-        .filter(n => n.toLowerCase().includes(userValue))
-        .slice(0, 25);
-        
+      const filtered = uniqueIdols.filter(n => n.toLowerCase().includes(userValue)).slice(0, 25);
       return interaction.respond(filtered.map(n => ({ name: n, value: n })));
     }
 
-    // --- AUTOCOMPLETADO DE ERAS ---
+    // AUTOCOMPLETADO DE ERAS
     if (focusName === 'eras') {
         let query = supabase.from('base_cards').select('era').not('era', 'is', null);
-
         if (selectedGroup) query = query.eq('group_name', selectedGroup);
         if (selectedIdol) query = query.ilike('name', `%${selectedIdol}%`);
-
         const { data: eras } = await query;
         if (!eras) return interaction.respond([]);
-
         const uniqueEras = [...new Set(eras.map(e => e.era))];
-        const filtered = uniqueEras
-            .filter(e => e.toLowerCase().includes(userValue))
-            .slice(0, 25);
-            
+        const filtered = uniqueEras.filter(e => e.toLowerCase().includes(userValue)).slice(0, 25);
         return interaction.respond(filtered.map(e => ({ name: e, value: e })));
     }
   },
@@ -192,63 +170,40 @@ module.exports = {
       }
 
       // --- MODO CARTAS ---
+      
+      // 1. Cargar Cartas
       let query = supabase
         .from('user_cards')
         .select(`
-          id,
-          rarity,
-          unique_card_id,
-          is_nft, 
-          base_cards!inner (
-            name,
-            group_name,
-            rarity,
-            rarity_level,
-            era,
-            card_code
-          )
+          id, rarity, unique_card_id,
+          base_cards!inner (name, group_name, rarity, rarity_level, era, card_code)
         `)
         .eq('user_id', inventoryOwnerId);
 
-      // Filtros
       if (idolFilter) query = query.ilike('base_cards.name', `%${idolFilter}%`);
       if (groupFilter) query = query.ilike('base_cards.group_name', `%${groupFilter}%`);
       if (eraFilter) query = query.ilike('base_cards.era', `%${eraFilter}%`);
       if (rarityFilter) query = query.eq('rarity', rarityFilter);
 
-      // Ordenamiento (Sort)
       switch (sortFilter) {
-        case 'old':
-            query = query.order('id', { ascending: true });
-            break;
-        case 'number':
-            query = query.order('unique_card_id', { ascending: true });
-            break;
-        case 'idol':
-            query = query.order('name', { foreignTable: 'base_cards', ascending: true });
-            break;
-        case 'group':
-            query = query.order('group_name', { foreignTable: 'base_cards', ascending: true });
-            break;
-        case 'era':
-            query = query.order('era', { foreignTable: 'base_cards', ascending: true });
-            break;
-        case 'new':
-        default:
-            query = query.order('id', { ascending: false });
-            break;
+        case 'old': query = query.order('id', { ascending: true }); break;
+        case 'number': query = query.order('unique_card_id', { ascending: true }); break;
+        case 'idol': query = query.order('name', { foreignTable: 'base_cards', ascending: true }); break;
+        case 'group': query = query.order('group_name', { foreignTable: 'base_cards', ascending: true }); break;
+        case 'era': query = query.order('era', { foreignTable: 'base_cards', ascending: true }); break;
+        default: query = query.order('id', { ascending: false }); break;
       }
 
       const { data: cards, error } = await query;
+      if (error) throw error;
+      if (!cards || cards.length === 0) return interaction.editReply(`😢 No se encontraron photocards.`);
 
-      if (error) {
-        console.error('Error buscando inventario:', error);
-        throw new Error('Error al obtener la colección');
-      }
-
-      if (!cards || cards.length === 0) {
-        return interaction.editReply(`😢 No se encontraron photocards con esos filtros.`);
-      }
+      // 2. Cargar Lista NFT del usuario (para el icono)
+      const { data: nftList } = await supabase.from('user_nfts').select('*').eq('user_id', inventoryOwnerId);
+      
+      // Crear Sets para búsqueda rápida
+      const nftGroups = new Set(nftList?.filter(n => n.target_type === 'group').map(n => n.target_name.toLowerCase()) || []);
+      const nftIdols = new Set(nftList?.filter(n => n.target_type === 'idol').map(n => n.target_name.toLowerCase()) || []);
 
       // Paginación
       let page = 0;
@@ -263,100 +218,99 @@ module.exports = {
           .setColor('#2ecc71')
           .setTitle(`📚 Inventario de ${targetUser.username}`)
           .setDescription(
-            shown
-              .map(c => {
+            shown.map(c => {
                 const rarity = rarityConfig[c.rarity] || rarityConfig[1];
-                const cleanName = c.base_cards.name.split(' — ')[0].trim();
+                const rawName = c.base_cards.name || 'Unknown';
+                const cleanName = rawName.split(' — ')[0].trim();
                 const group = c.base_cards.group_name || 'sin grupo';
                 const era = c.base_cards.era || 'desconocida';
                 const code = c.unique_card_id || c.base_cards.card_code;
                 
-                // LÓGICA NFT
-                const nftStatus = c.is_nft ? ` ${nftEmoji}` : '';
+                // VERIFICACIÓN NFT
+                const isNft = nftGroups.has(group.toLowerCase()) || nftIdols.has(cleanName.toLowerCase());
+                const nftStatus = isNft ? ` ${nftEmoji}` : '';
 
                 return `${rarity.stars} ${cleanName} — ${group} (${era})${nftStatus}\n\`${code}\``;
-              })
-              .join('\n\n')
+              }).join('\n\n')
           )
           .setFooter({ text: `Página ${page + 1}/${Math.ceil(cards.length / pageSize)} • Total: ${cards.length} cartas` })
           .setTimestamp();
       };
 
-      const generateRow = (disabled = false) => new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId('prev')
-          .setLabel('⬅️')
-          .setStyle(ButtonStyle.Primary)
-          .setDisabled(disabled || page === 0),
-        new ButtonBuilder()
-          .setCustomId('next')
-          .setLabel('➡️')
-          .setStyle(ButtonStyle.Primary)
-          .setDisabled(disabled || page >= Math.ceil(cards.length / pageSize) - 1),
-        new ButtonBuilder()
-          .setCustomId('show_ids')
-          .setLabel('🔍 IDs')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(disabled),
-        new ButtonBuilder()
-          .setCustomId('show_items')
-          .setLabel('🎁 Items')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(disabled),
-        new ButtonBuilder()
-          .setCustomId('cancel')
-          .setLabel('❌ Cerrar')
-          .setStyle(ButtonStyle.Danger)
-          .setDisabled(disabled)
-      );
+      const generateRow = (currPage) => {
+        const totalPages = Math.ceil(cards.length / pageSize);
+        return new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('prev').setLabel('⬅️').setStyle(ButtonStyle.Primary).setDisabled(currPage === 0),
+          new ButtonBuilder().setCustomId('next').setLabel('➡️').setStyle(ButtonStyle.Primary).setDisabled(currPage >= totalPages - 1),
+          new ButtonBuilder().setCustomId('show_ids').setLabel('🔍 IDs').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('show_items').setLabel('🎁 Items').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('cancel').setLabel('❌ Cerrar').setStyle(ButtonStyle.Danger)
+        );
+      };
 
       const message = await interaction.editReply({ 
         embeds: [generateEmbed(page)], 
-        components: [generateRow()] 
+        components: [generateRow(page)] 
       });
 
+      // Collector
       const collector = message.createMessageComponentCollector({
-        time: 120000, 
+        time: 120000, // 2 minutos
         filter: i => i.user.id === commandExecutorId 
       });
 
       collector.on('collect', async i => {
-        if (i.customId === 'prev') {
-          page--;
-          await i.update({ embeds: [generateEmbed(page)], components: [generateRow()] });
-        } else if (i.customId === 'next') {
-          page++;
-          await i.update({ embeds: [generateEmbed(page)], components: [generateRow()] });
-        } else if (i.customId === 'show_ids') {
-          const start = page * pageSize;
-          const end = start + pageSize;
-          const shown = cards.slice(start, end);
-          const idString = shown.map(c => c.unique_card_id || c.base_cards.card_code || c.id).join(' ');
-          await i.reply({ content: idString || 'No hay IDs disponibles en esta página.', ephemeral: true });
-        } else if (i.customId === 'show_items') {
-          const { data: packs } = await supabase.from('user_packs').select('quantity, packs(name, emoji)').eq('user_id', inventoryOwnerId).gt('quantity', 0);
-          if (!packs || packs.length === 0) return i.reply({ content: '🎁 No hay packs.', ephemeral: true });
-          
-          const list = packs.map(p => `${p.packs.emoji} ${p.packs.name} x${p.quantity}`).join('\n');
-          await i.reply({
-            embeds: [new EmbedBuilder().setColor('#f1c40f').setTitle(`🎁 Packs de ${targetUser.username}`).setDescription(list).setTimestamp()],
-            ephemeral: true
-          });
-        } else if (i.customId === 'cancel') {
-          collector.stop('cancelled');
-          await i.deleteReply().catch(() => {});
+        try {
+            if (i.customId === 'cancel') {
+                collector.stop('closed_by_user');
+                await interaction.deleteReply().catch(() => {}); 
+                return;
+            }
+
+            if (i.customId === 'prev') page--;
+            if (i.customId === 'next') page++;
+
+            if (i.customId === 'prev' || i.customId === 'next') {
+                await i.update({ 
+                    embeds: [generateEmbed(page)], 
+                    components: [generateRow(page)] 
+                });
+            }
+
+            if (i.customId === 'show_ids') {
+                const start = page * pageSize;
+                const end = start + pageSize;
+                const currentIds = cards.slice(start, end).map(c => c.unique_card_id || c.base_cards.card_code).join(' ');
+                await i.reply({ content: currentIds || 'No IDs', ephemeral: true });
+            }
+
+            if (i.customId === 'show_items') {
+                const { data: p } = await supabase.from('user_packs').select('quantity, packs(name, emoji)').eq('user_id', inventoryOwnerId).gt('quantity', 0);
+                const l = p?.map(x => `${x.packs.emoji} ${x.packs.name} x${x.quantity}`).join('\n') || 'Sin packs';
+                await i.reply({ embeds: [new EmbedBuilder().setColor('#f1c40f').setDescription(l)], ephemeral: true });
+            }
+
+        } catch (error) {
+            console.error("Error en botón:", error);
+            if (!i.replied && !i.deferred) {
+                await i.reply({ content: '❌ Error al procesar la acción.', ephemeral: true }).catch(() => {});
+            }
         }
       });
 
       collector.on('end', async (_, reason) => {
-        if (reason !== 'cancelled') {
-          await message.edit({ components: [generateRow(true)] }).catch(() => {});
+        if (reason !== 'closed_by_user') {
+            try {
+                const disabledRow = generateRow(page);
+                disabledRow.components.forEach(btn => btn.setDisabled(true));
+                await message.edit({ components: [disabledRow] });
+            } catch (e) {}
         }
       });
 
     } catch (err) {
-      console.error('Error en /inventory:', err);
-      try { await interaction.editReply('❌ Ocurrió un error al mostrar la colección.'); } catch (e) {}
+      console.error('Error fatal en inventory:', err);
+      try { await interaction.editReply('❌ Ocurrió un error al mostrar el inventario.'); } catch (e) {}
     }
   }
 };
