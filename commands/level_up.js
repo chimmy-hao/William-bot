@@ -13,8 +13,7 @@ const supabase = createClient(
 
 // --- CONFIGURACIÓN ---
 const strawberryEmoji = '<:strawberrity:1411384728119939182>'; 
-
-// ID DEL BOT (Debe estar en tus variables de entorno en Render como CLIENT_ID)
+// ID del Bot para el Pool
 const BOT_ID = process.env.CLIENT_ID; 
 
 // Helper para generar ID
@@ -90,9 +89,8 @@ module.exports = {
       return interaction.reply({ content: '⚠️ Debes usar el **Modo Manual** (escribiendo 10 códigos) o el **Modo Auto** (seleccionando Rareza e Idol).', ephemeral: true });
     }
 
-    // Verificación crítica: Si no hay CLIENT_ID configurado, avisar
     if (!BOT_ID) {
-        return interaction.reply({ content: '❌ Error de configuración: Falta la variable `CLIENT_ID` en Render para el Pool de Cartas.', ephemeral: true });
+        return interaction.reply({ content: '❌ Error: Falta configurar la variable `CLIENT_ID` en Render.', ephemeral: true });
     }
 
     try {
@@ -160,7 +158,7 @@ module.exports = {
         cardsToConsume = validGroup;
       }
 
-      // --- VALIDACIÓN FINAL ---
+      // --- VALIDACIÓN ---
       const firstCard = cardsToConsume[0];
       const currentRarity = firstCard.rarity;
       const currentEra = firstCard.base_cards.era;
@@ -181,6 +179,7 @@ module.exports = {
         return interaction.editReply('❌ Las cartas de Rareza 3 (Legendarias) ya están en el nivel máximo.');
       }
 
+      // --- BUSCAR TARGET ---
       const nextRarity = currentRarity + 1;
       
       const { data: targetBaseCard, error: targetError } = await supabase
@@ -196,30 +195,32 @@ module.exports = {
         return interaction.editReply(`❌ Error: No existe una versión de **Rareza ${nextRarity}** para esta carta en la base de datos.`);
       }
 
-      // --- EJECUCIÓN (TRANSFER TO BOT POOL & MINT) ---
-      
-      // 1. ASEGURAR QUE EL BOT EXISTA EN LA DB
-      // Esto evita el error de Foreign Key Constraint
-      await supabase.from('users').upsert({ 
-          user_id: BOT_ID, 
-          username: 'William Bot (Pool)', 
-          balance: 0 
-      });
-
-      // 2. TRANSFERIR CARTAS AL BOT
+      // --- EJECUCIÓN (LÓGICA DE POOL + FALLBACK) ---
       const idsToBurn = cardsToConsume.map(c => c.id);
+      let wentToPool = true;
 
+      // INTENTO 1: Enviar al Pool del Bot
       const { error: transferError } = await supabase
         .from('user_cards')
-        .update({ user_id: BOT_ID }) // Se las damos al bot
+        .update({ user_id: BOT_ID })
         .in('id', idsToBurn);
 
+      // Si falla el transfer (por permisos), las borramos para que el usuario no se las quede
       if (transferError) {
-        console.error(transferError);
-        return interaction.editReply('❌ Error crítico al transferir las cartas al Pool del Bot.');
+        console.warn('No se pudo transferir al bot (Permisos Supabase), procediendo a borrar...', transferError);
+        wentToPool = false;
+        
+        const { error: deleteError } = await supabase
+            .from('user_cards')
+            .delete()
+            .in('id', idsToBurn);
+            
+        if (deleteError) {
+            return interaction.editReply('❌ Error crítico: No se pudieron consumir las cartas.');
+        }
       }
 
-      // 3. CREAR NUEVA CARTA
+      // 2. Crear nueva carta
       const newUniqueId = generateUniqueCardCode(targetBaseCard.card_code);
       
       const { error: mintError } = await supabase
@@ -232,8 +233,9 @@ module.exports = {
         });
 
       if (mintError) {
+        // Si falla dar la nueva carta, sería ideal devolver las viejas, pero es complejo.
         console.error(mintError);
-        return interaction.editReply('❌ Error al crear la nueva carta.');
+        return interaction.editReply('❌ Hubo un error al entregar tu nueva carta. Contacta a soporte.');
       }
 
       // --- VISUALIZACIÓN ---
@@ -262,12 +264,16 @@ module.exports = {
         
         attachment = new AttachmentBuilder(await canvas.encode('png'), { name: 'levelup.png' });
       } catch (e) {
-        console.error("Error cargando imagen canvas", e);
+        console.error("Error canvas", e);
       }
 
       const cleanName = targetBaseCard.name.split(' — ')[0].trim();
       const oldEmoji = getRarityEmoji(currentRarity);
       const newEmoji = getRarityEmoji(nextRarity);
+      
+      const footerText = wentToPool 
+        ? '♻️ Las cartas usadas se enviaron al Pool de Reciclaje del Bot.'
+        : '🗑️ Las cartas usadas han sido eliminadas.';
 
       const embed = new EmbedBuilder()
         .setColor('#9b59b6')
@@ -276,7 +282,7 @@ module.exports = {
             `Has combinado **10 cartas** de ${cleanName} (${oldEmoji}) para obtener su versión superior.` +
             `\n\n🔥 **Cartas consumidas:** 10\n🌟 **Nueva Rareza:** ${newEmoji}\n🆔 **Nuevo Código:** \`${newUniqueId}\``
         )
-        .setFooter({ text: 'Las cartas usadas se han enviado al Pool del Bot.' });
+        .setFooter({ text: footerText });
 
       if (attachment) {
         embed.setImage('attachment://levelup.png');
