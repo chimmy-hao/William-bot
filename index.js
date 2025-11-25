@@ -1,14 +1,13 @@
 const { Client, GatewayIntentBits, Collection, Events, REST, Routes } = require('discord.js');
 const fs = require('node:fs');
 const path = require('node:path');
-const http = require('node:http'); // 👈 Módulo necesario para el servidor web
+const http = require('node:http'); 
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 
 // ==========================================
-// 🌐 SERVIDOR WEB FALSO PARA RENDER
+// 🌐 SERVIDOR WEB FALSO PARA RENDER (KEEP-ALIVE)
 // ==========================================
-// Esto engaña a Render para que crea que es una web y no apague el bot por error de puerto.
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('William Bot is running and ready!');
@@ -17,9 +16,10 @@ const server = http.createServer((req, res) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`🌐 Web server listening on port ${PORT}`);
+}).on('error', (err) => {
+    console.error('❌ Server error:', err);
 });
 // ==========================================
-
 
 // Supabase connection
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
@@ -67,40 +67,42 @@ function loadCommands() {
     for (const file of commandFiles) {
         const filePath = path.join(commandsPath, file);
         try {
+            // Limpiamos la cache para permitir recargas en caliente si fuera necesario
             delete require.cache[require.resolve(filePath)];
             const command = require(filePath);
             if ('data' in command && 'execute' in command) {
                 client.commands.set(command.data.name, command);
-                console.log(`✅ Loaded command: ${command.data.name}`);
+                // console.log(`✅ Loaded: ${command.data.name}`); // Comentado para reducir spam en logs
             } else {
-                console.log(`⚠️ Command at ${filePath} is missing required "data" or "execute" property.`);
+                console.log(`⚠️ Command at ${filePath} is missing "data" or "execute".`);
             }
         } catch (error) {
             console.error(`❌ Error loading command ${file}:`, error);
         }
     }
+    console.log(`✅ ${client.commands.size} commands loaded.`);
 }
 
-// Deploy slash commands
+// Deploy slash commands (FUNCIÓN MANUAL)
 async function deployCommands() {
     const commands = [];
     for (const command of client.commands.values()) commands.push(command.data.toJSON());
 
     const rest = new REST().setToken(process.env.DISCORD_TOKEN);
     try {
-        console.log('🔄 Started refreshing application (/) commands...');
+        console.log('🔄 Refreshing application (/) commands...');
         if (process.env.GUILD_ID) {
             await rest.put(
                 Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
                 { body: commands }
             );
-            console.log('✅ Successfully reloaded guild application (/) commands.');
+            console.log('✅ Guild commands reloaded.');
         } else {
             await rest.put(
                 Routes.applicationCommands(process.env.CLIENT_ID),
                 { body: commands }
             );
-            console.log('✅ Successfully reloaded global application (/) commands.');
+            console.log('✅ Global commands reloaded.');
         }
     } catch (error) {
         console.error('❌ Error deploying commands:', error);
@@ -112,55 +114,61 @@ client.once(Events.ClientReady, async readyClient => {
     console.log(`🤖 Bot is ready! Logged in as ${readyClient.user.tag}`);
     console.log(`📊 Serving ${client.guilds.cache.size} guilds`);
     
-    // 👇 NUEVO ESTADO: Listening to ทัก (FIRST SIGHT) - LYKN
     client.user.setPresence({
         activities: [{
             name: 'ทัก (FIRST SIGHT) - LYKN', 
-            type: 2, // 2 significa LISTENING
+            type: 2, // Listening
         }],
         status: 'online',
     });
 
-    await deployCommands();
+    // 👇 ¡ESTO ES LO IMPORTANTE! 👇
+    // Comentamos esta línea para que NO registre comandos cada vez que se reinicia.
+    // await deployCommands(); 
+    console.log('⏩ Skipped command deployment for faster startup.');
+
     cleanupTempDirectory();
 });
 
 // Interaction handler with autocomplete support
 client.on(Events.InteractionCreate, async interaction => {
     try {
-        if (interaction.isAutocomplete()) {
-            const command = client.commands.get(interaction.commandName);
-            if (!command || !command.autocomplete) return;
+        const command = client.commands.get(interaction.commandName);
 
+        if (interaction.isAutocomplete()) {
+            if (!command || !command.autocomplete) return;
             await command.autocomplete(interaction, supabase);
             return;
         }
 
         if (!interaction.isChatInputCommand()) return;
-        const command = client.commands.get(interaction.commandName);
         if (!command) return;
 
         await command.execute(interaction, supabase);
     } catch (error) {
         console.error(`❌ Error handling interaction:`, error);
-        const errorMessage = { content: '❌ There was an error while executing this command!', ephemeral: true };
-        if (interaction.replied || interaction.deferred) {
-            await interaction.followUp(errorMessage).catch(() => {});
+        // Evitar crash si ya se respondió
+        if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({ content: '❌ Error executing command!', ephemeral: true }).catch(() => {});
         } else {
-            await interaction.reply(errorMessage).catch(() => {});
+            await interaction.followUp({ content: '❌ Error executing command!', ephemeral: true }).catch(() => {});
         }
     }
 });
 
-// Global error handlers
-process.on('unhandledRejection', (reason, promise) => console.error('🚨 Unhandled Rejection at:', promise, 'reason:', reason));
-process.on('uncaughtException', error => console.error('🚨 Uncaught Exception:', error));
-client.on('error', error => console.error('🚨 Discord.js error:', error));
-client.on('warn', info => console.warn('⚠️ Discord.js warning:', info));
+// Global error handlers (Evitan que el bot se apague por errores menores)
+process.on('unhandledRejection', (reason, promise) => {
+    // console.error('🚨 Unhandled Rejection:', reason); // Descomentar si necesitas depurar
+});
+process.on('uncaughtException', error => {
+    console.error('🚨 Uncaught Exception:', error);
+    // NO hacemos process.exit(1) para intentar mantenerlo vivo
+});
+client.on('error', error => console.error('🚨 Discord Client error:', error));
 
 // Graceful shutdown
 function shutdown() {
-    console.log('🛑 Graceful shutdown...');
+    console.log('🛑 Shutting down...');
     cleanupTempDirectory();
     client.destroy();
     process.exit(0);
@@ -170,15 +178,7 @@ process.on('SIGTERM', shutdown);
 
 // Load commands and login
 loadCommands();
-client.login(process.env.DISCORD_TOKEN).catch(error => { console.error('❌ Failed to login:', error); process.exit(1); });
-
-// Hot reload commands in development
-if (process.env.NODE_ENV === 'development') {
-    console.log('🔥 Development mode: Hot reload enabled');
-    const chokidar = require('chokidar');
-    chokidar.watch('./commands/**/*.js').on('change', async (path) => {
-        console.log(`🔄 Reloading command: ${path}`);
-        loadCommands();
-        await deployCommands();
-    });
-}
+client.login(process.env.DISCORD_TOKEN).catch(error => { 
+    console.error('❌ Failed to login:', error); 
+    process.exit(1); 
+});
