@@ -11,7 +11,6 @@ const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 const moneyEmoji = '<:berrycoin:1411737957081288724>';
-// Emoji de etiqueta para venta (puedes cambiarlo por tu custom tag emoji si tienes uno)
 const tagEmoji = '🏷️'; 
 
 // --- 📊 CONFIGURACIÓN DE ECONOMÍA ---
@@ -21,7 +20,7 @@ const PRICE_RANGES = {
   3: { min: 5000, max: 20000 }
 };
 
-const TAX_RATE = 0.5; // 50% de multa sobre la diferencia
+const TAX_RATE = 0.5; 
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -44,7 +43,6 @@ module.exports = {
     const codesInput = interaction.options.getString('codes');
     const price = interaction.options.getInteger('price');
 
-    // Limpieza de códigos (quitar duplicados y espacios vacíos)
     const codesArr = [...new Set(codesInput.split(/[\s,]+/).filter(c => c))];
 
     if (codesArr.length === 0) {
@@ -52,14 +50,14 @@ module.exports = {
     }
 
     try {
+      // Paso 1: Respuesta Efímera (Solo tú la ves)
       await interaction.deferReply({ ephemeral: true });
 
-      // 1. BUSCAR CARTAS EN DB
-      // Traemos rarity_level desde base_cards para saber el rango correcto
+      // BUSCAR CARTAS
       const { data: cards, error } = await supabase
         .from('user_cards')
         .select(`
-            id, unique_card_id, is_nft,
+            id, unique_card_id, is_nft, rarity,
             base_cards (name, group_name, rarity_level)
         `)
         .in('unique_card_id', codesArr)
@@ -67,34 +65,28 @@ module.exports = {
 
       if (error) {
         console.error('Error DB:', error);
-        return interaction.editReply('❌ Error de base de datos al buscar las cartas.');
+        return interaction.editReply('❌ Error de base de datos.');
       }
 
       if (!cards || cards.length === 0) {
-        return interaction.editReply('❌ No encontré ninguna de esas cartas en tu inventario (o no son tuyas).');
+        return interaction.editReply('❌ No encontré esas cartas en tu inventario.');
       }
 
-      // NO FILTRAMOS NFT: El usuario pidió poder venderlas igual.
-      // Solo verificamos que existan.
       const validCards = cards; 
 
-      // 2. CÁLCULO DE IMPUESTOS Y ADVERTENCIAS DE RANGO
+      // CÁLCULO DE IMPUESTOS
       let totalTax = 0;
-      let warningLines = new Set(); // Usamos Set para no repetir mensajes iguales
+      let warningLines = new Set();
 
       if (price > 0) {
         validCards.forEach(c => {
-            // Obtener rareza (fallback a 1 si no está definida)
             const rarity = c.base_cards.rarity_level || 1;
             const range = PRICE_RANGES[rarity] || PRICE_RANGES[1];
-            
             let diff = 0;
 
-            // Verificamos si se sale del rango
             if (price < range.min) diff = range.min - price;
             else if (price > range.max) diff = price - range.max;
 
-            // Si hay diferencia, calculamos impuesto y guardamos el mensaje
             if (diff > 0) {
                 totalTax += Math.floor(diff * TAX_RATE);
                 warningLines.add(`• Rareza ${rarity}: Rango recomendado **${range.min} - ${range.max}** ${moneyEmoji}`);
@@ -102,88 +94,78 @@ module.exports = {
         });
       }
 
-      // Chequeo preventivo de saldo si hay impuesto
+      // Chequeo de saldo para impuesto
       if (totalTax > 0) {
         const { data: user } = await supabase.from('users').select('balance').eq('user_id', userId).single();
         const userBalance = user ? user.balance : 0;
         
         if (userBalance < totalTax) {
              const warningText = Array.from(warningLines).join('\n');
-             return interaction.editReply(`❌ **No tienes fondos para pagar el impuesto.**\n\n${warningText}\n\nEl precio se aleja demasiado. Necesitas **${totalTax}** ${moneyEmoji} para publicar.`);
+             return interaction.editReply(`❌ **No tienes fondos para el impuesto.**\n\n${warningText}\n\nNecesitas **${totalTax}** ${moneyEmoji}.`);
         }
       }
 
-      // 3. CONSTRUCCIÓN DEL EMBED DE CONFIRMACIÓN
+      // EMBED DE CONFIRMACIÓN (Privado)
       let description = `Estás a punto de ${price > 0 ? 'vender' : 'retirar'} **${validCards.length}** cartas.`;
       
-      if (price > 0) {
-          description += `\n${tagEmoji} **Precio:** ${price} ${moneyEmoji} c/u`;
-      }
+      if (price > 0) description += `\n${tagEmoji} **Precio:** ${price} ${moneyEmoji} c/u`;
 
-      // Lista visual de cartas
       const cardList = validCards.slice(0, 10).map(c => {
-          const nftIcon = c.is_nft ? '🔒' : ''; // Indicador visual si es NFT
+          const nftIcon = c.is_nft ? '🔒' : ''; 
           return `• ${c.base_cards.name} (\`${c.unique_card_id}\`) ${nftIcon}`;
       }).join('\n');
       
       description += `\n\n**Cartas:**\n${cardList}`;
       if (validCards.length > 10) description += `\n...y ${validCards.length - 10} más.`;
 
-      // Agregar sección de advertencia si hay impuesto
       if (totalTax > 0) {
           const warningText = Array.from(warningLines).join('\n');
-          description += `\n\n⚠️ **¡Precio fuera de rango!**\n${warningText}\nEl precio ingresado se aleja de lo recomendado.\n**Debes pagar un impuesto de ${totalTax} ${moneyEmoji} para proceder.**`;
+          description += `\n\n⚠️ **¡Precio fuera de rango!**\n${warningText}\n**Impuesto a pagar: ${totalTax} ${moneyEmoji}**`;
       }
 
       const embed = new EmbedBuilder()
-        .setColor(totalTax > 0 ? '#e74c3c' : '#2ecc71') // Rojo alerta o Verde bien
+        .setColor(totalTax > 0 ? '#e74c3c' : '#2ecc71')
         .setTitle(price > 0 ? '💰 Confirmar Venta' : '🗑️ Confirmar Retiro')
-        .setDescription(description)
-        .setFooter({ text: '¿Deseas continuar?' });
+        .setDescription(description);
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('accept').setLabel('Aceptar').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('ignore').setLabel('Ignorar').setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId('ignore').setLabel('Cancelar').setStyle(ButtonStyle.Danger)
       );
 
       const message = await interaction.editReply({ embeds: [embed], components: [row] });
 
-      // 4. MANEJO DE BOTONES
+      // COLLECTOR
       const collector = message.createMessageComponentCollector({
         componentType: ComponentType.Button,
         time: 60000
       });
 
       collector.on('collect', async i => {
+        // --- EVITAR "INTERACTION FAILED" ---
+        // Le decimos a Discord "Espera un momento" inmediatamente.
+        await i.deferUpdate(); 
+
         if (i.customId === 'ignore') {
             collector.stop('cancelled');
-            await i.update({ content: '❌ Operación cancelada.', embeds: [], components: [] });
+            await i.editReply({ content: '❌ Operación cancelada.', embeds: [], components: [] });
             return;
         }
 
         if (i.customId === 'accept') {
             collector.stop('confirmed');
 
-            // A. COBRAR IMPUESTO (Transacción segura)
+            // 1. COBRAR IMPUESTO
             if (totalTax > 0) {
                 const { data: freshUser } = await supabase.from('users').select('balance').eq('user_id', userId).single();
-                
                 if (!freshUser || freshUser.balance < totalTax) {
-                    return i.update({ content: '❌ Error: Tus fondos cambiaron y ya no alcanzan para el impuesto.', embeds: [], components: [] });
+                    return i.editReply({ content: '❌ Error: Fondos insuficientes al momento de procesar.', embeds: [], components: [] });
                 }
                 
-                const { error: taxError } = await supabase
-                    .from('users')
-                    .update({ balance: freshUser.balance - totalTax })
-                    .eq('user_id', userId);
-                
-                if (taxError) {
-                    return i.update({ content: '❌ Error al cobrar el impuesto.', embeds: [], components: [] });
-                }
+                await supabase.from('users').update({ balance: freshUser.balance - totalTax }).eq('user_id', userId);
             }
 
-            // B. ACTUALIZAR BASE DE DATOS (Poner en venta)
-            // Si el precio es 0, enviamos NULL a la base de datos para quitar la venta
+            // 2. ACTUALIZAR BASE DE DATOS
             const finalPrice = price > 0 ? price : null;
             const idsToUpdate = validCards.map(c => c.id);
 
@@ -193,21 +175,43 @@ module.exports = {
                 .in('id', idsToUpdate);
 
             if (updateError) {
-                console.error('Update Error:', updateError);
-                return i.update({ content: '❌ Error al actualizar la base de datos.', embeds: [], components: [] });
+                return i.editReply({ content: '❌ Error al actualizar la base de datos.', embeds: [], components: [] });
             }
 
-            const successMsg = price > 0 
-                ? `✅ **¡Listado!** ${validCards.length} cartas están ahora en el Marketplace.` + (totalTax > 0 ? ` (Impuesto pagado: ${totalTax})` : '')
-                : `✅ **¡Retirado!** Las cartas ya no están en venta.`;
+            // 3. ACTUALIZAR MENSAJE PRIVADO (Feedback rápido)
+            await i.editReply({ 
+                content: `✅ Operación exitosa. ${price > 0 ? 'Publicando en el canal...' : 'Cartas retiradas.'}`, 
+                embeds: [], 
+                components: [] 
+            });
 
-            await i.update({ content: successMsg, embeds: [], components: [] });
+            // 4. ENVIAR MENSAJE PÚBLICO (Solo si es venta)
+            if (price > 0) {
+                const publicEmbed = new EmbedBuilder()
+                    .setColor('#f1c40f') // Dorado/Amarillo de Mercado
+                    .setTitle('📢 ¡Nuevas cartas en el Marketplace!')
+                    .setDescription(`**${interaction.user.username}** ha puesto en venta:`)
+                    .addFields(
+                        { name: 'Precio', value: `${price} ${moneyEmoji}`, inline: true },
+                        { name: 'Cantidad', value: `${validCards.length} cartas`, inline: true }
+                    )
+                    .setFooter({ text: 'Usa /buy card:CÓDIGO para comprar' })
+                    .setTimestamp();
+
+                // Mostramos las primeras 5 cartas en el anuncio público para no spamear
+                const publicList = validCards.slice(0, 5).map(c => `• **${c.base_cards.name}** (\`${c.unique_card_id}\`)`).join('\n');
+                publicEmbed.addFields({ name: 'Items', value: publicList + (validCards.length > 5 ? `\n...y ${validCards.length - 5} más` : '') });
+
+                // Enviamos al canal (visible para todos)
+                await interaction.channel.send({ embeds: [publicEmbed] });
+            }
         }
       });
 
     } catch (err) {
-      console.error('Error crítico en sell:', err);
-      try { await interaction.editReply('❌ Ocurrió un error inesperado.'); } catch (e) {}
+      console.error('Error en sell:', err);
+      // Try-catch para el reply por si acaso
+      try { await interaction.editReply('❌ Error inesperado.'); } catch (e) {}
     }
   }
 };
