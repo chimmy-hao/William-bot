@@ -27,19 +27,16 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('marketplace')
     .setDescription('🏪 Explora las cartas en venta de otros jugadores')
-    // FILTROS
     .addStringOption(opt => opt.setName('group').setDescription('Filtrar por grupo').setAutocomplete(true))
     .addStringOption(opt => opt.setName('idol').setDescription('Filtrar por idol').setAutocomplete(true))
     .addIntegerOption(opt => opt.setName('rarity').setDescription('Filtrar por rareza').setMinValue(1).setMaxValue(3))
     .addStringOption(opt => opt.setName('eras').setDescription('Filtrar por Era').setAutocomplete(true))
     .addUserOption(opt => opt.setName('seller').setDescription('Filtrar por vendedor específico'))
-    
-    // ORDENAMIENTO ACTUALIZADO
     .addStringOption(opt =>
         opt.setName('sort')
           .setDescription('Orden de visualización (Default: Menor Precio)')
           .addChoices(
-              { name: 'Precio: Menor a Mayor', value: 'price_asc' }, // Default
+              { name: 'Precio: Menor a Mayor', value: 'price_asc' }, 
               { name: 'Precio: Mayor a Menor', value: 'price_desc' },
               { name: 'Más recientes', value: 'new' },
               { name: 'Más antiguas', value: 'old' },
@@ -49,7 +46,6 @@ module.exports = {
           )
       ),
 
-  // AUTOCOMPLETADO
   async autocomplete(interaction) {
     const focusedOption = interaction.options.getFocused(true);
     const focusName = focusedOption.name;
@@ -89,20 +85,16 @@ module.exports = {
   async execute(interaction) {
     const commandExecutorId = interaction.user.id; 
 
-    // Filtros
     const idolFilter = interaction.options.getString('idol');
     const groupFilter = interaction.options.getString('group');
     const rarityFilter = interaction.options.getInteger('rarity');
     const eraFilter = interaction.options.getString('eras');
     const sellerFilter = interaction.options.getUser('seller');
-    
-    // CAMBIO: Default es 'price_asc'
     const sortFilter = interaction.options.getString('sort') || 'price_asc'; 
 
     try {
       await interaction.deferReply();
 
-      // CONSULTA: Cartas con precio != null
       let query = supabase
         .from('user_cards')
         .select(`
@@ -111,39 +103,21 @@ module.exports = {
         `)
         .not('market_price', 'is', null);
 
-      // Aplicar Filtros
       if (idolFilter) query = query.ilike('base_cards.name', `%${idolFilter}%`);
       if (groupFilter) query = query.ilike('base_cards.group_name', `%${groupFilter}%`);
       if (eraFilter) query = query.ilike('base_cards.era', `%${eraFilter}%`);
       if (rarityFilter) query = query.eq('rarity', rarityFilter);
       if (sellerFilter) query = query.eq('user_id', sellerFilter.id);
 
-      // Ordenamiento Actualizado
       switch (sortFilter) {
-        case 'price_asc': 
-            query = query.order('market_price', { ascending: true }); 
-            break;
-        case 'price_desc': 
-            query = query.order('market_price', { ascending: false }); 
-            break;
-        case 'old': 
-            query = query.order('id', { ascending: true }); 
-            break;
-        case 'new': 
-            query = query.order('id', { ascending: false }); 
-            break;
-        case 'idol':
-            query = query.order('name', { foreignTable: 'base_cards', ascending: true });
-            break;
-        case 'group':
-            query = query.order('group_name', { foreignTable: 'base_cards', ascending: true });
-            break;
-        case 'era':
-            query = query.order('era', { foreignTable: 'base_cards', ascending: true });
-            break;
-        default: 
-            query = query.order('market_price', { ascending: true }); 
-            break;
+        case 'price_asc': query = query.order('market_price', { ascending: true }); break;
+        case 'price_desc': query = query.order('market_price', { ascending: false }); break;
+        case 'old': query = query.order('id', { ascending: true }); break;
+        case 'new': query = query.order('id', { ascending: false }); break;
+        case 'idol': query = query.order('name', { foreignTable: 'base_cards', ascending: true }); break;
+        case 'group': query = query.order('group_name', { foreignTable: 'base_cards', ascending: true }); break;
+        case 'era': query = query.order('era', { foreignTable: 'base_cards', ascending: true }); break;
+        default: query = query.order('market_price', { ascending: true }); break;
       }
 
       const { data: cards, error } = await query;
@@ -157,7 +131,6 @@ module.exports = {
         return interaction.editReply(`🏪 El mercado está vacío (o no hay resultados para esos filtros).`);
       }
 
-      // Paginación
       let page = 0;
       const pageSize = 9;
 
@@ -182,7 +155,8 @@ module.exports = {
 
             embed.addFields({
                 name: `${cleanName} ${rarity.stars}`,
-                value: `💎 ${group}\n${priceTag}\n\`${c.unique_card_id}\`\n👤 ${seller}`,
+                // DIAMANTE ELIMINADO AQUÍ
+                value: `📂 ${group}\n${priceTag}\n\`${c.unique_card_id}\`\n👤 ${seller}`,
                 inline: true 
             });
         });
