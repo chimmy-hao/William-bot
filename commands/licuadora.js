@@ -12,7 +12,7 @@ const RECIPES = {
   banana: {
     name: 'Banana Pack',
     emoji: '<:pack_banana:1413292531134759053>',
-    required: { 1: 8, 2: 2, 3: 0 } // 8 1s, 2 2s, 0 3s
+    required: { 1: 8, 2: 2, 3: 0 } // 8 de 1s, 2 de 2s
   },
   grape: {
     name: 'Grape Pack',
@@ -100,7 +100,7 @@ module.exports = {
       for (const [key, recipe] of Object.entries(RECIPES)) {
         const r = recipe.required;
         if (counts[1] === r[1] && counts[2] === r[2] && counts[3] === r[3]) {
-          matchedPack = key;
+          matchedPack = key; // key será 'banana', 'grape' o 'kiwi'
           break; 
         }
       }
@@ -130,24 +130,33 @@ module.exports = {
       if (moveError) throw moveError;
 
       // B) Dar el Pack al Usuario
+      // NOTA: Usamos 'pack_code' en lugar de 'pack_name' para coincidir con tu DB
       const { data: currentPack } = await supabase
         .from('user_packs')
-        .select('amount')
+        .select('quantity') // Asumo que tu columna de cantidad se llama 'quantity' como en use.js
         .eq('user_id', userId)
-        .eq('pack_name', matchedPack)
+        .eq('pack_code', matchedPack)
         .single();
 
-      const newAmount = (currentPack?.amount || 0) + 1;
+      // Si no existe el pack, la cantidad es 0. Si existe, tomamos 'quantity'
+      const newAmount = (currentPack?.quantity || 0) + 1;
 
-      // Upsert especificando la clave de conflicto para evitar errores en Supabase
+      // Upsert corregido: Usamos 'pack_code' y 'quantity'
       const { error: packError } = await supabase
         .from('user_packs')
         .upsert(
-            { user_id: userId, pack_name: matchedPack, amount: newAmount },
-            { onConflict: 'user_id, pack_name' }
+            { 
+              user_id: userId, 
+              pack_code: matchedPack, // CORREGIDO: antes decía pack_name
+              quantity: newAmount     // CORREGIDO: antes decía amount
+            },
+            { onConflict: 'user_id, pack_code' } // CORREGIDO: coincidir con la clave primaria compuesta
         );
 
-      if (packError) throw packError;
+      if (packError) {
+        console.error("Error al dar pack:", packError); // Muestra error en consola si falla
+        throw packError;
+      }
 
       // 7. ACTUALIZAR COOLDOWN Y CONFIRMAR
       userData.uses += 1;
@@ -167,8 +176,10 @@ module.exports = {
       await interaction.editReply({ embeds: [embed] });
 
     } catch (err) {
-      console.error(err);
-      interaction.editReply('❌ Ocurrió un error en la licuadora (Base de datos).');
+      console.error("Error CRÍTICO en licuadora:", err);
+      // Intentamos mostrar el mensaje de error de DB si es posible
+      const msg = err.message || "Error desconocido";
+      await interaction.editReply(`❌ Ocurrió un error en la base de datos: \`${msg}\``).catch(() => {});
     }
   }
 };
