@@ -44,7 +44,7 @@ module.exports = {
         return interaction.editReply('❌ Error de conexión al buscar las cartas.');
       }
 
-      // === VALIDACIÓN ESTRICTA ===
+      // === VALIDACIÓN ESTRICTA (NUEVA) ===
       // Creamos una lista de los IDs que SÍ encontramos
       const foundIds = userCards ? userCards.map(c => c.unique_card_id) : [];
 
@@ -54,14 +54,14 @@ module.exports = {
       // Si hay códigos faltantes, cancelamos todo y mostramos error
       if (missingCodes.length > 0) {
         return interaction.editReply({
-          content: `❌ **Error:** No encontré las siguientes cartas (o están mal escritas):\n\`${missingCodes.join(', ')}\``
+          content: `❌ **Error:** No encontré las siguientes cartas (o están mal escritas/no son tuyas):\n\`${missingCodes.join(', ')}\``
         });
       }
-      // ==========================
-
+      
       if (userCards.length === 0) {
         return interaction.editReply('❌ No se encontró ninguna carta válida.');
       }
+      // ===================================
 
       // 3. CONFIGURACIÓN DEL GRID (DISEÑO MINIMALISTA)
       const cardWidth = 200;
@@ -103,7 +103,7 @@ module.exports = {
         const x = gap + (col * (cardWidth + gap));
         const y = gap + (row * (cardHeight + textSpace + gap));
 
-        // -- IMAGEN --
+        // -- IMAGEN CON BORDES --
         const radius = 15;
         ctx.save();
         ctx.beginPath();
@@ -123,7 +123,6 @@ module.exports = {
         ctx.restore();
 
         // -- TEXTO --
-        // Código corto (prefijo)
         const prefix = card.unique_card_id.split('.')[0];
 
         ctx.font = '16px Arial'; 
@@ -155,3 +154,4 @@ module.exports = {
     }
   }
 };
+
