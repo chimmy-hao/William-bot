@@ -8,12 +8,11 @@ const supabase = createClient(
 );
 
 // --- CONFIGURACIÓN DE RECETAS ---
-// El bot buscará si tus cartas coinciden EXACTAMENTE con esto
 const RECIPES = {
   banana: {
     name: 'Banana Pack',
     emoji: '<:pack_banana:1413292531134759053>',
-    required: { 1: 8, 2: 2, 3: 0 } // 8 R1, 2 R2, 0 R3
+    required: { 1: 8, 2: 2, 3: 0 } // 8 1s, 2 2s, 0 3s
   },
   grape: {
     name: 'Grape Pack',
@@ -70,34 +69,27 @@ module.exports = {
 
     try {
       // 2. PROCESAR CÓDIGOS
-      // Limpiamos espacios extra, comas, etc. y creamos un array limpio
       const codeList = codesInput.split(/[\s,]+/).filter(c => c.length > 0);
-      
-      // Eliminamos duplicados si el usuario puso el mismo código 2 veces por error
       const uniqueCodes = [...new Set(codeList)];
 
       if (uniqueCodes.length === 0) return interaction.editReply('❌ No ingresaste ningún código válido.');
 
       // 3. BUSCAR CARTAS EN SUPABASE
-      // Verificamos que existan y QUE SEAN DE ESTE USUARIO
       const { data: cards, error } = await supabase
         .from('user_cards')
-        .select('id, unique_card_id, rarity') // Asegúrate que tu columna es 'rarity' o 'rarity_level'
+        .select('id, unique_card_id, rarity') 
         .eq('user_id', userId)
         .in('unique_card_id', uniqueCodes);
 
       if (error) throw error;
 
-      // Validación: ¿Encontró todas las cartas?
       if (!cards || cards.length !== uniqueCodes.length) {
         return interaction.editReply(`❌ **Error:** Alguna de las cartas no existe o no te pertenece. Verificaste ${uniqueCodes.length} códigos pero solo encontré ${cards ? cards.length : 0}.`);
       }
 
-      // 4. CONTAR RAREZAS (El análisis de ingredientes)
+      // 4. CONTAR RAREZAS
       const counts = { 1: 0, 2: 0, 3: 0 };
-      
       cards.forEach(card => {
-        // Fallback: si rarity es null, asumimos 1, o ajusta según tu DB
         const r = card.rarity || 1; 
         if (counts[r] !== undefined) counts[r]++;
       });
@@ -107,22 +99,20 @@ module.exports = {
 
       for (const [key, recipe] of Object.entries(RECIPES)) {
         const r = recipe.required;
-        // Comparamos si tiene EXACTAMENTE la cantidad necesaria de cada rareza
         if (counts[1] === r[1] && counts[2] === r[2] && counts[3] === r[3]) {
           matchedPack = key;
-          break; // Encontramos la receta, dejamos de buscar
+          break; 
         }
       }
 
-      // Si no coincide con nada
       if (!matchedPack) {
         return interaction.editReply({
           content: `❌ **Mezcla Incorrecta.** Los ingredientes no coinciden con ningún Pack.\n\n` +
-                   `**Ingresaste:** ${counts[1]}x R1 | ${counts[2]}x R2 | ${counts[3]}x R3\n\n` +
+                   `**Ingresaste:** ${counts[1]}x 1s | ${counts[2]}x 2s | ${counts[3]}x 3s\n\n` +
                    `📜 **Recetas:**\n` +
-                   `🍌 **Banana:** 8x R1 + 2x R2\n` +
-                   `🍇 **Grape:** 4x R1 + 6x R2\n` +
-                   `🥝 **Kiwi:** 4x R1 + 4x R2 + 2x R3`
+                   `🍌 **Banana:** 8x 1s + 2x 2s\n` +
+                   `🍇 **Grape:** 4x 1s + 6x 2s\n` +
+                   `🥝 **Kiwi:** 4x 1s + 4x 2s + 2x 3s`
         });
       }
 
@@ -140,7 +130,6 @@ module.exports = {
       if (moveError) throw moveError;
 
       // B) Dar el Pack al Usuario
-      // Buscamos si ya tiene packs para sumar
       const { data: currentPack } = await supabase
         .from('user_packs')
         .select('amount')
@@ -150,9 +139,13 @@ module.exports = {
 
       const newAmount = (currentPack?.amount || 0) + 1;
 
+      // Upsert especificando la clave de conflicto para evitar errores en Supabase
       const { error: packError } = await supabase
         .from('user_packs')
-        .upsert({ user_id: userId, pack_name: matchedPack, amount: newAmount });
+        .upsert(
+            { user_id: userId, pack_name: matchedPack, amount: newAmount },
+            { onConflict: 'user_id, pack_name' }
+        );
 
       if (packError) throw packError;
 
