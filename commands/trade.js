@@ -16,7 +16,6 @@ const supabase = createClient(
 );
 
 // --- CONFIGURACIÓN EMOJIS ---
-const moneyEmoji = '<:berrycoin:1411737957081288724>';
 const strawberryEmoji = '<:strawberrity:1411384728119939182>'; 
 
 // Helper para estrellas/fresas
@@ -115,10 +114,8 @@ module.exports = {
       const canvas = createCanvas(canvasWidth, canvasHeight);
       const ctx = canvas.getContext('2d');
 
-      // Función auxiliar para dibujar una fila
       const drawRow = async (cards, yOffset, label) => {
         ctx.fillStyle = '#ffffff';
-        // CAMBIO 1: Fuente Arial 17px (más fina y pequeña)
         ctx.font = '17px Arial'; 
         ctx.fillText(label, 10, yOffset - 10);
 
@@ -127,8 +124,6 @@ module.exports = {
             const x = gap + (i * (cardWidth + gap));
             try {
                 const img = await loadImage(card.base_cards.image_url);
-                
-                // CAMBIO 2: Radio en 10 (curva suave tipo tarjeta de crédito)
                 const radius = 10; 
                 
                 ctx.save();
@@ -147,7 +142,6 @@ module.exports = {
                 
                 ctx.drawImage(img, x, yOffset, cardWidth, cardHeight);
                 ctx.restore();
-
             } catch (e) {
                 console.error('Error loading img', e);
             }
@@ -159,25 +153,26 @@ module.exports = {
 
       const attachment = new AttachmentBuilder(await canvas.encode('png'), { name: 'trade_preview.png' });
 
-      // 4. EMBED (Textos)
+      // 4. EMBED MEJORADO
       const formatList = (cards) => {
         return cards.map(c => {
             const rEmoji = getRarityEmoji(c.rarity || c.base_cards.rarity_level);
             const cleanName = c.base_cards.name.split(' — ')[0].trim();
-            return `**${cleanName}** ${rEmoji}\n${c.base_cards.group_name}\n\`${c.unique_card_id}\``;
-        }).join('\n\n');
+            // Formato más limpio y compacto
+            return `\`${c.unique_card_id}\` **${cleanName}** ${rEmoji}`;
+        }).join('\n');
       };
 
       const embed = new EmbedBuilder()
-        .setColor('#3498db')
-        .setTitle('🔄 Solicitud de Intercambio')
-        .setDescription(`${sender} quiere intercambiar cartas con ${target}.`)
+        .setColor('#2ecc71') // Verde negociación
+        .setTitle('🔄 Propuesta de Intercambio')
+        .setDescription(`<@${sender.id}> quiere intercambiar cartas con <@${target.id}>.`)
         .addFields(
-            { name: `📤 ${sender.username} Ofrece:`, value: formatList(myCards), inline: true },
-            { name: `📥 Solicita de ${target.username}:`, value: formatList(theirCards), inline: true }
+            { name: `📤 ${sender.username} Entrega:`, value: formatList(myCards), inline: true },
+            { name: `📥 ${target.username} Entrega:`, value: formatList(theirCards), inline: true }
         )
         .setImage('attachment://trade_preview.png')
-        .setFooter({ text: 'Ambos deben estar de acuerdo. El usuario mencionado debe aceptar.' })
+        .setFooter({ text: 'Ambos usuarios deben confirmar para realizar el trato.' })
         .setTimestamp();
 
       const row = new ActionRowBuilder().addComponents(
@@ -185,12 +180,13 @@ module.exports = {
         new ButtonBuilder().setCustomId('deny_trade').setLabel('Rechazar').setStyle(ButtonStyle.Danger).setEmoji('✖️')
       );
 
-      // 5. ENVÍO + PING
+      // 5. ENVÍO + PING FORZADO (allowedMentions)
       const message = await interaction.editReply({ 
-        content: `🔔 <@${target.id}>, ¡tienes una oferta de intercambio!`,
+        content: `🔔 **¡Atención!** <@${target.id}>, tienes una oferta de intercambio.`,
         embeds: [embed], 
         files: [attachment],
-        components: [row] 
+        components: [row],
+        allowedMentions: { users: [target.id] } // <--- ESTO ARREGLA EL PING
       });
 
       // 6. COLLECTOR
@@ -211,13 +207,13 @@ module.exports = {
         }
 
         if (i.customId === 'accept_trade') {
-            // Verificación final
+            // Verificación final (anti-robo/scam de último segundo)
             const { count: checkMyCards } = await supabase.from('user_cards').select('*', { count: 'exact', head: true }).in('id', myCards.map(c => c.id)).eq('user_id', sender.id);
             const { count: checkTheirCards } = await supabase.from('user_cards').select('*', { count: 'exact', head: true }).in('id', theirCards.map(c => c.id)).eq('user_id', target.id);
 
             if (checkMyCards !== myCards.length || checkTheirCards !== theirCards.length) {
                 collector.stop('error');
-                return i.update({ content: '❌ **Error:** Alguien perdió las cartas durante la espera. Operación cancelada.', components: [] });
+                return i.update({ content: '❌ **Error:** Alguien perdió las cartas durante la espera (¿quizás las vendió o recicló?). Operación cancelada.', components: [] });
             }
 
             // Ejecución
@@ -227,7 +223,7 @@ module.exports = {
             collector.stop('accepted');
             
             await i.update({ 
-                content: `✅ **¡Intercambio Exitoso!**\n🤝 <@${sender.id}> y <@${target.id}> han intercambiado cartas.`,
+                content: `✅ **¡Intercambio Exitoso!**\n🤝 <@${sender.id}> y <@${target.id}> han completado el trato.`,
                 components: []
             });
         }
