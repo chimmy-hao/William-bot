@@ -10,7 +10,7 @@ module.exports = {
     .setDescription('📸 Genera una imagen con tus cartas (Grid View)')
     .addStringOption(option => 
       option.setName('codes')
-            .setDescription('Códigos separados por espacios (Máx 9)')
+            .setDescription('Códigos separados por espacios (Ej: CWJL2.4957)')
             .setRequired(true)
     ),
 
@@ -18,11 +18,12 @@ module.exports = {
     const userId = interaction.user.id;
     const inputCodes = interaction.options.getString('codes');
 
-    // 1. Limpiar códigos
-    const codes = inputCodes
-      .split(/[\s,]+/)
-      .filter(c => c.length > 0)
-      .slice(0, 9);
+    // 1. Limpiar y separar códigos
+    // Esto separa por espacios o comas y elimina vacíos
+    const codesRaw = inputCodes.split(/[\s,]+/).filter(c => c.length > 0);
+    
+    // Eliminamos duplicados por si el usuario pone el mismo código dos veces
+    const codes = [...new Set(codesRaw)].slice(0, 9); // Máximo 9 para que entre en la imagen
 
     if (codes.length === 0) return interaction.reply({ content: '❌ Escribe al menos un código.', ephemeral: true });
 
@@ -30,6 +31,7 @@ module.exports = {
       await interaction.deferReply();
 
       // 2. Buscar cartas en DB
+      // Buscamos EXACTAMENTE esos IDs en el inventario del usuario
       const { data: userCards, error } = await supabase
         .from('user_cards')
         .select(`
@@ -44,26 +46,31 @@ module.exports = {
         return interaction.editReply('❌ Error de conexión al buscar las cartas.');
       }
 
-      // === VALIDACIÓN ESTRICTA (NUEVA) ===
-      // Creamos una lista de los IDs que SÍ encontramos
+      // === 3. VALIDACIÓN ESTRICTA (LO QUE PEDISTE) ===
+      
+      // Lista de IDs que la base de datos encontró realmente
+      // (Si escribiste bien el código y es tuyo, estará aquí)
       const foundIds = userCards ? userCards.map(c => c.unique_card_id) : [];
 
-      // Filtramos cuáles de los códigos que escribiste NO aparecieron en la búsqueda
-      const missingCodes = codes.filter(code => !foundIds.includes(code));
+      // Filtramos: ¿Qué códigos de los que escribiste NO aparecieron en la búsqueda?
+      const invalidCodes = codes.filter(code => !foundIds.includes(code));
 
-      // Si hay códigos faltantes, cancelamos todo y mostramos error
-      if (missingCodes.length > 0) {
+      // Si hay al menos un código inválido, paramos todo.
+      if (invalidCodes.length > 0) {
+        // Unimos los códigos erróneos con comas para mostrarlos
+        const listaErrores = invalidCodes.map(c => `\`${c}\``).join(', ');
+        
         return interaction.editReply({
-          content: `❌ **Error:** No encontré las siguientes cartas (o están mal escritas/no son tuyas):\n\`${missingCodes.join(', ')}\``
+          content: `❌ **Código mal ingresado o no te pertenece:**\nLos siguientes códigos no coinciden con tu inventario:\n👉 ${listaErrores}`
         });
       }
-      
+
       if (userCards.length === 0) {
         return interaction.editReply('❌ No se encontró ninguna carta válida.');
       }
-      // ===================================
+      // ===============================================
 
-      // 3. CONFIGURACIÓN DEL GRID (DISEÑO MINIMALISTA)
+      // 4. CONFIGURACIÓN DEL GRID (DISEÑO)
       const cardWidth = 200;
       const cardHeight = 300;
       const gap = 20;
@@ -79,7 +86,7 @@ module.exports = {
       const canvas = createCanvas(finalWidth, finalHeight);
       const ctx = canvas.getContext('2d');
 
-      // 4. CARGAR IMÁGENES
+      // 5. CARGAR IMÁGENES
       const loadedImages = await Promise.all(
         userCards.map(async (card) => {
           try {
@@ -93,7 +100,7 @@ module.exports = {
 
       const validCards = loadedImages.filter(c => c !== null);
 
-      // 5. DIBUJAR
+      // 6. DIBUJAR
       for (let i = 0; i < validCards.length; i++) {
         const card = validCards[i];
         
@@ -103,7 +110,7 @@ module.exports = {
         const x = gap + (col * (cardWidth + gap));
         const y = gap + (row * (cardHeight + textSpace + gap));
 
-        // -- IMAGEN CON BORDES --
+        // -- Borde Redondeado --
         const radius = 15;
         ctx.save();
         ctx.beginPath();
@@ -122,8 +129,10 @@ module.exports = {
         ctx.drawImage(card.img, x, y, cardWidth, cardHeight);
         ctx.restore();
 
-        // -- TEXTO --
+        // -- Texto del ID --
         const prefix = card.unique_card_id.split('.')[0];
+        // O si prefieres ver el código completo (incluyendo los 4 números), usa:
+        // const fullCode = card.unique_card_id;
 
         ctx.font = '16px Arial'; 
         ctx.fillStyle = '#ffffff';
@@ -136,6 +145,7 @@ module.exports = {
         const textX = x + (cardWidth / 2);
         const textY = y + cardHeight + 20;
         
+        // Aquí muestro el prefijo (ej: CWJL2), si quieres todo el código cambia 'prefix' por card.unique_card_id
         ctx.fillText(prefix, textX, textY);
         
         ctx.shadowBlur = 0;
