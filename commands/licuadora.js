@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 
 // --- CONEXIÓN SUPABASE ---
+// Asegúrate de que tu archivo .env esté cargado antes de iniciar el bot
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
@@ -12,7 +13,7 @@ const RECIPES = {
   banana: {
     name: 'Banana Pack',
     emoji: '<:pack_banana:1413292531134759053>',
-    required: { 1: 8, 2: 2, 3: 0 } // 8 de 1s, 2 de 2s
+    required: { 1: 8, 2: 2, 3: 0 } 
   },
   grape: {
     name: 'Grape Pack',
@@ -37,7 +38,7 @@ module.exports = {
     .setDescription('🌪️ Recicla tus cartas para obtener un pack.')
     .addStringOption(option =>
       option.setName('codes')
-        .setDescription('Los códigos de las cartas a sacrificar (separados por espacio)')
+        .setDescription('Los códigos de las cartas (separados por espacio)')
         .setRequired(true)
     ),
 
@@ -100,14 +101,14 @@ module.exports = {
       for (const [key, recipe] of Object.entries(RECIPES)) {
         const r = recipe.required;
         if (counts[1] === r[1] && counts[2] === r[2] && counts[3] === r[3]) {
-          matchedPack = key; // key será 'banana', 'grape' o 'kiwi'
+          matchedPack = key;
           break; 
         }
       }
 
       if (!matchedPack) {
         return interaction.editReply({
-          content: `❌ **Mezcla Incorrecta.** Los ingredientes no coinciden con ningún Pack.\n\n` +
+          content: `❌ **Mezcla Incorrecta.**\n\n` +
                    `**Ingresaste:** ${counts[1]}x 1s | ${counts[2]}x 2s | ${counts[3]}x 3s\n\n` +
                    `📜 **Recetas:**\n` +
                    `🍌 **Banana:** 8x 1s + 2x 2s\n` +
@@ -130,31 +131,30 @@ module.exports = {
       if (moveError) throw moveError;
 
       // B) Dar el Pack al Usuario
-      // NOTA: Usamos 'pack_code' en lugar de 'pack_name' para coincidir con tu DB
+      // NOTA: Usamos 'pack_code' y 'quantity' para coincidir con tu DB
       const { data: currentPack } = await supabase
         .from('user_packs')
-        .select('quantity') // Asumo que tu columna de cantidad se llama 'quantity' como en use.js
+        .select('quantity')
         .eq('user_id', userId)
         .eq('pack_code', matchedPack)
         .single();
 
-      // Si no existe el pack, la cantidad es 0. Si existe, tomamos 'quantity'
       const newAmount = (currentPack?.quantity || 0) + 1;
 
-      // Upsert corregido: Usamos 'pack_code' y 'quantity'
+      // Upsert corregido con nombres de columnas válidos
       const { error: packError } = await supabase
         .from('user_packs')
         .upsert(
             { 
               user_id: userId, 
-              pack_code: matchedPack, // CORREGIDO: antes decía pack_name
-              quantity: newAmount     // CORREGIDO: antes decía amount
+              pack_code: matchedPack, 
+              quantity: newAmount 
             },
-            { onConflict: 'user_id, pack_code' } // CORREGIDO: coincidir con la clave primaria compuesta
+            { onConflict: 'user_id, pack_code' }
         );
 
       if (packError) {
-        console.error("Error al dar pack:", packError); // Muestra error en consola si falla
+        console.error("Error al dar pack:", packError);
         throw packError;
       }
 
@@ -176,8 +176,7 @@ module.exports = {
       await interaction.editReply({ embeds: [embed] });
 
     } catch (err) {
-      console.error("Error CRÍTICO en licuadora:", err);
-      // Intentamos mostrar el mensaje de error de DB si es posible
+      console.error("Error licuadora:", err);
       const msg = err.message || "Error desconocido";
       await interaction.editReply(`❌ Ocurrió un error en la base de datos: \`${msg}\``).catch(() => {});
     }
