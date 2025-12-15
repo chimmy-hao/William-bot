@@ -1,185 +1,176 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
+const { createCanvas, loadImage } = require('@napi-rs/canvas');
 
-// --- CONEXIÓN SUPABASE ---
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
-
-// --- CONFIGURACIÓN DE RECETAS ---
-const RECIPES = {
-  banana: {
-    name: 'Banana Pack',
-    emoji: '<:pack_banana:1413292531134759053>',
-    required: { 1: 8, 2: 2, 3: 0 } // 8 de 1s, 2 de 2s
-  },
-  grape: {
-    name: 'Grape Pack',
-    emoji: '<:pack_grape:1413292369675157655>',
-    required: { 1: 4, 2: 6, 3: 0 }
-  },
-  kiwi: {
-    name: 'Kiwi Pack',
-    emoji: '<:pack_kiwi:1413292487455408201>',
-    required: { 1: 4, 2: 4, 3: 2 }
-  }
-};
-
-// --- COOLDOWN ---
-const cooldowns = new Map();
-const MAX_USES = 3;
-const COOLDOWN_TIME = 12 * 60 * 60 * 1000; // 12 Horas
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName('licuadora')
-    .setDescription('🌪️ Recicla tus cartas para obtener un pack.')
-    .addStringOption(option =>
+    .setName('view')
+    .setDescription('📸 Genera una imagen con tus cartas (Grid View)')
+    .addStringOption(option => 
       option.setName('codes')
-        .setDescription('Los códigos de las cartas a sacrificar (separados por espacio)')
-        .setRequired(true)
+            .setDescription('Códigos separados por espacios (Ej: CWJL2.4957)')
+            .setRequired(true)
     ),
 
   async execute(interaction) {
     const userId = interaction.user.id;
-    const botId = interaction.client.user.id;
-    const codesInput = interaction.options.getString('codes');
+    const inputCodes = interaction.options.getString('codes');
 
-    // 1. GESTIÓN DE COOLDOWN
-    const now = Date.now();
-    let userData = cooldowns.get(userId) || { uses: 0, expiresAt: 0 };
+    // 1. Limpiar y separar códigos
+    // Separa por espacios o comas, quita vacíos y limita a 9 cartas
+    const codesRaw = inputCodes.split(/[\s,]+/).filter(c => c.length > 0);
+    const codes = [...new Set(codesRaw)].slice(0, 9); 
 
-    if (userData.uses >= MAX_USES) {
-      if (now < userData.expiresAt) {
-        const remaining = userData.expiresAt - now;
-        const hours = Math.floor(remaining / (1000 * 60 * 60));
-        const mins = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
-        return interaction.reply({ 
-          content: `⏳ **La licuadora se está enfriando.** Vuelve en **${hours}h ${mins}m**.`, 
-          ephemeral: true 
-        });
-      } else {
-        // Reset cooldown
-        userData = { uses: 0, expiresAt: 0 };
-      }
+    // Validación básica inicial (Efímera)
+    if (codes.length === 0) {
+      return interaction.reply({ content: '❌ Escribe al menos un código.', ephemeral: true });
     }
 
-    await interaction.deferReply();
-
     try {
-      // 2. PROCESAR CÓDIGOS
-      const codeList = codesInput.split(/[\s,]+/).filter(c => c.length > 0);
-      const uniqueCodes = [...new Set(codeList)];
+      // ⚠️ NOTA IMPORTANTE:
+      // No usamos 'deferReply' aquí todavía. Primero verificamos si hay errores.
+      // Así, si hay error, el mensaje puede ser invisible (ephemeral).
 
-      if (uniqueCodes.length === 0) return interaction.editReply('❌ No ingresaste ningún código válido.');
-
-      // 3. BUSCAR CARTAS EN SUPABASE
-      const { data: cards, error } = await supabase
+      // 2. Buscar cartas en DB
+      const { data: userCards, error } = await supabase
         .from('user_cards')
-        .select('id, unique_card_id, rarity') 
-        .eq('user_id', userId)
-        .in('unique_card_id', uniqueCodes);
+        .select(`
+          unique_card_id,
+          base_cards (image_url, name)
+        `)
+        .in('unique_card_id', codes)
+        .eq('user_id', userId);
 
-      if (error) throw error;
-
-      if (!cards || cards.length !== uniqueCodes.length) {
-        return interaction.editReply(`❌ **Error:** Alguna de las cartas no existe o no te pertenece. Verificaste ${uniqueCodes.length} códigos pero solo encontré ${cards ? cards.length : 0}.`);
+      if (error) {
+        console.error('Error DB:', error);
+        return interaction.reply({ content: '❌ Error de conexión al buscar las cartas.', ephemeral: true });
       }
 
-      // 4. CONTAR RAREZAS
-      const counts = { 1: 0, 2: 0, 3: 0 };
-      cards.forEach(card => {
-        const r = card.rarity || 1; 
-        if (counts[r] !== undefined) counts[r]++;
-      });
+      // === 3. VALIDACIÓN ESTRICTA Y EFÍMERA ===
+      const foundIds = userCards ? userCards.map(c => c.unique_card_id) : [];
+      
+      // Filtramos qué códigos de los que escribiste NO aparecieron
+      const invalidCodes = codes.filter(code => !foundIds.includes(code));
 
-      // 5. VERIFICAR SI COINCIDE CON ALGUNA RECETA
-      let matchedPack = null;
-
-      for (const [key, recipe] of Object.entries(RECIPES)) {
-        const r = recipe.required;
-        if (counts[1] === r[1] && counts[2] === r[2] && counts[3] === r[3]) {
-          matchedPack = key; // key será 'banana', 'grape' o 'kiwi'
-          break; 
-        }
-      }
-
-      if (!matchedPack) {
-        return interaction.editReply({
-          content: `❌ **Mezcla Incorrecta.** Los ingredientes no coinciden con ningún Pack.\n\n` +
-                   `**Ingresaste:** ${counts[1]}x 1s | ${counts[2]}x 2s | ${counts[3]}x 3s\n\n` +
-                   `📜 **Recetas:**\n` +
-                   `🍌 **Banana:** 8x 1s + 2x 2s\n` +
-                   `🍇 **Grape:** 4x 1s + 6x 2s\n` +
-                   `🥝 **Kiwi:** 4x 1s + 4x 2s + 2x 3s`
+      // Si hay errores, respondemos SOLO AL USUARIO (Ephemeral) y cancelamos
+      if (invalidCodes.length > 0) {
+        const listaErrores = invalidCodes.map(c => `\`${c}\``).join(', ');
+        
+        return interaction.reply({
+          content: `❌ **Código incorrecto o no te pertenece:**\nLos siguientes códigos no coinciden con tu inventario:\n👉 ${listaErrores}`,
+          ephemeral: true 
         });
       }
 
-      const recipe = RECIPES[matchedPack];
+      if (userCards.length === 0) {
+        return interaction.reply({ content: '❌ No se encontró ninguna carta válida.', ephemeral: true });
+      }
+      // ===============================================
 
-      // 6. EJECUTAR EL INTERCAMBIO
+      // 4. CONFIRMACIÓN PÚBLICA
+      // Como ya pasamos las validaciones, ahora sí "pensamos" públicamente para generar la imagen
+      await interaction.deferReply(); 
+
+      // 5. CONFIGURACIÓN DEL CANVAS
+      const cardWidth = 200;
+      const cardHeight = 300;
+      const gap = 20;
+      const textSpace = 30; 
+      const columns = 3;
+
+      const rows = Math.ceil(userCards.length / columns);
+      const actualCols = Math.min(userCards.length, columns);
       
-      // A) Mover cartas al Bot
-      const cardIds = cards.map(c => c.id);
-      const { error: moveError } = await supabase
-        .from('user_cards')
-        .update({ user_id: botId })
-        .in('id', cardIds);
-      
-      if (moveError) throw moveError;
+      const finalWidth = (cardWidth * actualCols) + (gap * (actualCols + 1));
+      const finalHeight = (cardHeight + textSpace) * rows + (gap * (rows + 1));
 
-      // B) Dar el Pack al Usuario
-      // NOTA: Usamos 'pack_code' en lugar de 'pack_name' para coincidir con tu DB
-      const { data: currentPack } = await supabase
-        .from('user_packs')
-        .select('quantity') // Asumo que tu columna de cantidad se llama 'quantity' como en use.js
-        .eq('user_id', userId)
-        .eq('pack_code', matchedPack)
-        .single();
+      const canvas = createCanvas(finalWidth, finalHeight);
+      const ctx = canvas.getContext('2d');
 
-      // Si no existe el pack, la cantidad es 0. Si existe, tomamos 'quantity'
-      const newAmount = (currentPack?.quantity || 0) + 1;
+      // 6. CARGAR IMÁGENES
+      const loadedImages = await Promise.all(
+        userCards.map(async (card) => {
+          try {
+            const img = await loadImage(card.base_cards.image_url);
+            return { img, ...card };
+          } catch (e) {
+            return null;
+          }
+        })
+      );
 
-      // Upsert corregido: Usamos 'pack_code' y 'quantity'
-      const { error: packError } = await supabase
-        .from('user_packs')
-        .upsert(
-            { 
-              user_id: userId, 
-              pack_code: matchedPack, // CORREGIDO: antes decía pack_name
-              quantity: newAmount     // CORREGIDO: antes decía amount
-            },
-            { onConflict: 'user_id, pack_code' } // CORREGIDO: coincidir con la clave primaria compuesta
-        );
+      const validCards = loadedImages.filter(c => c !== null);
 
-      if (packError) {
-        console.error("Error al dar pack:", packError); // Muestra error en consola si falla
-        throw packError;
+      // 7. DIBUJAR
+      for (let i = 0; i < validCards.length; i++) {
+        const card = validCards[i];
+        
+        const col = i % columns;
+        const row = Math.floor(i / columns);
+
+        const x = gap + (col * (cardWidth + gap));
+        const y = gap + (row * (cardHeight + textSpace + gap));
+
+        // -- DIBUJO CON BORDE REDONDEADO --
+        const radius = 15; // Radio del borde
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + cardWidth - radius, y);
+        ctx.quadraticCurveTo(x + cardWidth, y, x + cardWidth, y + radius);
+        ctx.lineTo(x + cardWidth, y + cardHeight - radius);
+        ctx.quadraticCurveTo(x + cardWidth, y + cardHeight, x + cardWidth - radius, y + cardHeight);
+        ctx.lineTo(x + radius, y + cardHeight);
+        ctx.quadraticCurveTo(x, y + cardHeight, x, y + cardHeight - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
+        ctx.clip();
+        
+        ctx.drawImage(card.img, x, y, cardWidth, cardHeight);
+        ctx.restore();
+
+        // -- TEXTO (Código) --
+        const prefix = card.unique_card_id.split('.')[0];
+
+        ctx.font = '16px Arial'; 
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        
+        // Sombra para que se lea mejor
+        ctx.shadowColor = "rgba(0,0,0,0.8)";
+        ctx.shadowBlur = 3;
+        ctx.lineWidth = 1;
+
+        const textX = x + (cardWidth / 2);
+        const textY = y + cardHeight + 20;
+        
+        ctx.fillText(prefix, textX, textY);
+        
+        ctx.shadowBlur = 0;
       }
 
-      // 7. ACTUALIZAR COOLDOWN Y CONFIRMAR
-      userData.uses += 1;
-      if (userData.uses >= MAX_USES) userData.expiresAt = now + COOLDOWN_TIME;
-      cooldowns.set(userId, userData);
+      const attachment = new AttachmentBuilder(await canvas.encode('png'), { name: 'collection-view.png' });
 
-      const embed = new EmbedBuilder()
-        .setColor('#FFA500')
-        .setTitle(`🌪️ ¡Licuadora Completada!`)
-        .setDescription(`Has triturado **${cards.length} cartas** correctamente.`)
-        .addFields(
-          { name: 'Resultado', value: `Obtuviste 1x ${recipe.emoji} **${recipe.name}**` },
-          { name: 'Inventario', value: 'El pack se ha guardado en tu inventario.' }
-        )
-        .setFooter({ text: `Usos restantes hoy: ${MAX_USES - userData.uses}` });
-
-      await interaction.editReply({ embeds: [embed] });
+      // 8. ENVIAR IMAGEN PÚBLICA
+      // Usamos editReply porque en el paso 4 usamos deferReply
+      await interaction.editReply({ 
+        content: `📸 Vista de colección de <@${userId}>`, 
+        files: [attachment] 
+      });
 
     } catch (err) {
-      console.error("Error CRÍTICO en licuadora:", err);
-      // Intentamos mostrar el mensaje de error de DB si es posible
-      const msg = err.message || "Error desconocido";
-      await interaction.editReply(`❌ Ocurrió un error en la base de datos: \`${msg}\``).catch(() => {});
+      console.error('Error en view:', err);
+      // Manejo de error inteligente:
+      // Si falló DESPUÉS del defer (paso 4), editamos. Si fue ANTES, respondemos efímero.
+      if (interaction.deferred || interaction.replied) {
+          await interaction.editReply({ content: '❌ Ocurrió un error al generar la imagen.' }).catch(() => {});
+      } else {
+          await interaction.reply({ content: '❌ Ocurrió un error interno.', ephemeral: true }).catch(() => {});
+      }
     }
   }
 };
+
