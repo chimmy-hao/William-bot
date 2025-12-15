@@ -147,7 +147,7 @@ module.exports = {
         ctx.imageSmoothingQuality = 'high';     // <--- Fuerza la máxima calidad posible
         
         // --- CONFIGURACIÓN DEL BORDE ---
-        const radius = 35; // <--- CAMBIA ESTE NÚMERO: Más alto = más redondo, Más bajo = más cuadrado.
+        const radius = 50; // <--- CAMBIA ESTE NÚMERO: Más alto = más redondo, Más bajo = más cuadrado.
 
         // Dibujar forma redondeada (Path)
         ctx.beginPath();
