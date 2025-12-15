@@ -1,8 +1,8 @@
 const { SlashCommandBuilder } = require('discord.js'); 
 const { createClient } = require('@supabase/supabase-js');
 
-// Importar configuración de packs (asegúrate de tener este archivo o ajustar la ruta si no lo usas)
-// Si no usas un archivo externo, puedes definir la lógica aquí, pero mantendré tu estructura original
+// Importar configuración de packs
+// Mantenemos tu ruta original
 const packConfigs = require('../packs'); 
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
@@ -54,7 +54,6 @@ module.exports = {
 
       const choices = packs.map(p => {
         const qty = userPacks.find(up => up.pack_code === p.code)?.quantity || 0;
-        // CAMBIO: Quité ${p.emoji} de aquí
         return { name: `${p.name} (${qty})`, value: p.code };
       });
 
@@ -75,7 +74,6 @@ module.exports = {
 
     if (focused.name === 'idol') {
       const { data: idols } = await supabase.from('base_cards').select('name');
-      // Limpiamos el nombre en el autocompletado también
       const uniqueIdols = [...new Set(idols.map(i => i.name.split(' — ')[0].trim()))];
       const filtered = uniqueIdols.filter(n => n.toLowerCase().includes(focused.value.toLowerCase())).slice(0, 25);
       return interaction.respond(filtered.map(n => ({ name: n, value: n })));
@@ -88,6 +86,7 @@ module.exports = {
     const grupo = interaction.options.getString('grupo');
     const idol = interaction.options.getString('idol');
 
+    // 1. Validar existencia del pack y posesión
     const { data: pack } = await supabase.from('packs').select('*').eq('code', packCode).single();
     if (!pack) return interaction.reply({ content: '❌ Ese pack no existe.', ephemeral: true });
 
@@ -102,82 +101,86 @@ module.exports = {
       return interaction.reply({ content: '❌ No tienes ese pack en tu inventario.', ephemeral: true });
     }
 
-    await supabase.from('user_packs').update({ quantity: userPack.quantity - 1 }).eq('id', userPack.id);
+    // Validaciones de Pack Específico (Orange/Strawberry)
+    if (pack.code === "orange" && !grupo) {
+        return interaction.reply({ content: '❌ Debes elegir un grupo para abrir un Orange Pack.', ephemeral: true });
+    }
+    if (pack.code === "strawberry" && (!grupo || !idol)) {
+        return interaction.reply({ content: '❌ Debes elegir grupo e idol para abrir un Strawberry Pack.', ephemeral: true });
+    }
+
+    await interaction.deferReply();
 
     const giveConfig = packConfigs[pack.code];
-    const cardsGiven = [];
+    let cardsToGive = [];
 
-    // Lógica de apertura (Misma que tenías)
-    if (giveConfig === "random5") {
-      for (let i = 0; i < 5; i++) {
-        const rarity = Math.floor(Math.random() * 3) + 1;
-        let query = supabase.from('base_cards').select('*').eq('rarity_level', rarity);
+    // 2. BUSCAR CARTAS (Sin gastar el pack todavía)
+    try {
+        if (giveConfig === "random5") {
+            for (let i = 0; i < 5; i++) {
+                const rarity = Math.floor(Math.random() * 3) + 1;
+                let query = supabase.from('base_cards').select('*').eq('rarity_level', rarity);
 
-        if (pack.code === "orange" && !grupo) {
-          return interaction.reply({ content: '❌ Debes elegir un grupo para abrir un Orange Pack.', ephemeral: true });
+                if (grupo) query = query.eq('group_name', grupo);
+                if (idol) query = query.eq('name', idol);
+
+                const { data: cards } = await query;
+                if (cards && cards.length > 0) {
+                    cardsToGive.push(cards[Math.floor(Math.random() * cards.length)]);
+                }
+            }
+        } else {
+            // Packs fijos
+            for (const { rarity, count } of giveConfig) {
+                let query = supabase.from('base_cards').select('*').eq('rarity_level', rarity);
+                if (grupo) query = query.eq('group_name', grupo);
+                
+                const { data: cards } = await query;
+
+                if (cards && cards.length > 0) {
+                    for (let i = 0; i < count; i++) {
+                        cardsToGive.push(cards[Math.floor(Math.random() * cards.length)]);
+                    }
+                }
+            }
         }
-        if (pack.code === "strawberry" && (!grupo || !idol)) {
-          return interaction.reply({ content: '❌ Debes elegir grupo e idol para abrir un Strawberry Pack.', ephemeral: true });
-        }
+    } catch (error) {
+        console.error("Error buscando cartas:", error);
+        return interaction.editReply({ content: '❌ Hubo un error al buscar las cartas. Tu pack no ha sido consumido.' });
+    }
 
-        if (grupo) query = query.eq('group_name', grupo);
-        if (idol) query = query.eq('name', idol); // Buscar por nombre (ojo: en DB está "Nombre — Grupo")
-                                                   // Esto funciona si el filtro es laxo, pero idealmente deberías usar ILIKE
-                                                   // Lo dejaré como estaba porque dijiste "sin cambios extra", 
-                                                   // pero avísame si el filtro de idol falla.
+    // 3. VERIFICAR RESULTADO
+    if (cardsToGive.length === 0) {
+      return interaction.editReply({ content: '❌ No se pudieron obtener cartas con esos filtros (o el grupo no tiene cartas de esa rareza). Tu pack está a salvo.', ephemeral: true });
+    }
 
-        const { data: cards } = await query;
-        if (!cards || cards.length === 0) continue;
+    // 4. CONSUMIR PACK Y ENTREGAR CARTAS
+    // A) Restar pack
+    await supabase.from('user_packs').update({ quantity: userPack.quantity - 1 }).eq('id', userPack.id);
 
-        const randomCard = cards[Math.floor(Math.random() * cards.length)];
-        const uniqueCode = generateUniqueCardCode(randomCard.card_code);
-        cardsGiven.push({ ...randomCard, unique_card_id: uniqueCode });
+    // B) Insertar cartas en DB
+    const finalCards = [];
+    for (const card of cardsToGive) {
+        const uniqueCode = generateUniqueCardCode(card.card_code);
+        finalCards.push({ ...card, unique_card_id: uniqueCode });
 
         await supabase.from('user_cards').insert([{
-          user_id: userId,
-          card_id: randomCard.id,
-          rarity: randomCard.rarity_level,
-          unique_card_id: uniqueCode
-        }]);
-      }
-    } else {
-      for (const { rarity, count } of giveConfig) {
-        let query = supabase.from('base_cards').select('*').eq('rarity_level', rarity);
-        if (grupo) query = query.eq('group_name', grupo);
-        // Nota: Aquí no había filtro por idol en tu código original de packs fijos, lo mantengo igual.
-        
-        const { data: cards } = await query;
-
-        if (!cards || cards.length === 0) continue;
-
-        for (let i = 0; i < count; i++) {
-          const randomCard = cards[Math.floor(Math.random() * cards.length)];
-          const uniqueCode = generateUniqueCardCode(randomCard.card_code);
-          cardsGiven.push({ ...randomCard, unique_card_id: uniqueCode });
-
-          await supabase.from('user_cards').insert([{
             user_id: userId,
-            card_id: randomCard.id,
-            rarity: randomCard.rarity_level,
+            card_id: card.id,
+            rarity: card.rarity_level,
             unique_card_id: uniqueCode
-          }]);
-        }
-      }
+        }]);
     }
 
-    if (cardsGiven.length === 0) {
-      return interaction.reply({ content: '❌ No se pudieron obtener cartas con esos filtros.', ephemeral: true });
-    }
-
-    // Mostrar resultado
+    // 5. MOSTRAR RESULTADO
     const rarityEmoji = '<:strawberrity:1411384728119939182>';
-    const cardList = cardsGiven.map(c => {
+    const cardList = finalCards.map(c => {
       const emojiRarity = rarityEmoji.repeat(c.rarity_level || 1);
       const cleanName = c.name.split(' — ')[0].trim();
       return `${emojiRarity} ${cleanName} — ${c.group_name || 'sin grupo'} (Era ${c.era || 'desconocida'})\nCode: \`${c.unique_card_id}\``;
     }).join('\n');
 
-    return interaction.reply(`🎉 ${interaction.user.username} abrió ${pack.emoji} ${pack.name} y consiguió:\n${cardList}`);
+    return interaction.editReply(`🎉 ${interaction.user.username} abrió ${pack.emoji} ${pack.name} y consiguió:\n${cardList}`);
   }
 };
 
