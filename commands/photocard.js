@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
-const { createCanvas, loadImage } = require('@napi-rs/canvas'); // Necesario para el borde 15px
+const { createCanvas, loadImage } = require('@napi-rs/canvas'); // Necesario para el borde
 
 // Conexión a Supabase
 const supabase = createClient(
@@ -133,17 +133,23 @@ module.exports = {
 
       if (insertError) throw insertError;
 
-      // 6. PROCESAMIENTO DE IMAGEN (Canvas - Bordes 15px)
+      // 6. PROCESAMIENTO DE IMAGEN (Canvas - Bordes Redondeados)
       let attachment = null;
       try {
         const img = await loadImage(randomCard.image_url);
-        // Usamos el tamaño original de la imagen
+        
+        // Usamos el tamaño original para máxima calidad
         const canvas = createCanvas(img.width, img.height);
         const ctx = canvas.getContext('2d');
         
-        const radius = 15; // Radio solicitado
+        // --- MEJORAS DE CALIDAD ---
+        ctx.imageSmoothingEnabled = true;       // <--- Activa suavizado de bordes
+        ctx.imageSmoothingQuality = 'high';     // <--- Fuerza la máxima calidad posible
+        
+        // --- CONFIGURACIÓN DEL BORDE ---
+        const radius = 35; // <--- CAMBIA ESTE NÚMERO: Más alto = más redondo, Más bajo = más cuadrado.
 
-        // Dibujar forma redondeada
+        // Dibujar forma redondeada (Path)
         ctx.beginPath();
         ctx.moveTo(radius, 0);
         ctx.lineTo(img.width - radius, 0);
@@ -155,10 +161,12 @@ module.exports = {
         ctx.lineTo(0, radius);
         ctx.quadraticCurveTo(0, 0, radius, 0);
         ctx.closePath();
-        ctx.clip(); // Recortar
+        
+        ctx.clip(); // Recortar el canvas con la forma dibujada arriba
 
         ctx.drawImage(img, 0, 0);
         
+        // Codificar en PNG (Formato sin pérdida de calidad)
         attachment = new AttachmentBuilder(await canvas.encode('png'), { name: 'drop.png' });
       } catch (err) {
         console.error('Error procesando imagen canvas:', err);
