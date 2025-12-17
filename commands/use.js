@@ -2,7 +2,7 @@ const { SlashCommandBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 
 // Importar configuración de packs
-// Mantenemos tu ruta original
+// Asegúrate de que la ruta sea correcta según tu estructura de carpetas
 const packConfigs = require('../packs'); 
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
@@ -74,6 +74,7 @@ module.exports = {
 
     if (focused.name === 'idol') {
       const { data: idols } = await supabase.from('base_cards').select('name');
+      // Limpiamos el nombre para que el usuario vea "Win Metawin" y no "Win Metawin — Solista"
       const uniqueIdols = [...new Set(idols.map(i => i.name.split(' — ')[0].trim()))];
       const filtered = uniqueIdols.filter(n => n.toLowerCase().includes(focused.value.toLowerCase())).slice(0, 25);
       return interaction.respond(filtered.map(n => ({ name: n, value: n })));
@@ -122,7 +123,10 @@ module.exports = {
                 let query = supabase.from('base_cards').select('*').eq('rarity_level', rarity);
 
                 if (grupo) query = query.eq('group_name', grupo);
-                if (idol) query = query.eq('name', idol);
+                
+                // --- CORRECCIÓN AQUÍ ---
+                // Usamos ilike con % para que "Win Metawin" encuentre "Win Metawin — Solista"
+                if (idol) query = query.ilike('name', `%${idol}%`); 
 
                 const { data: cards } = await query;
                 if (cards && cards.length > 0) {
@@ -130,11 +134,14 @@ module.exports = {
                 }
             }
         } else {
-            // Packs fijos
+            // Packs fijos (Como el Strawberry que suele dar rarezas altas fijas)
             for (const { rarity, count } of giveConfig) {
                 let query = supabase.from('base_cards').select('*').eq('rarity_level', rarity);
                 if (grupo) query = query.eq('group_name', grupo);
                 
+                // --- CORRECCIÓN AQUÍ TAMBIÉN ---
+                if (idol) query = query.ilike('name', `%${idol}%`);
+
                 const { data: cards } = await query;
 
                 if (cards && cards.length > 0) {
@@ -151,7 +158,7 @@ module.exports = {
 
     // 3. VERIFICAR RESULTADO
     if (cardsToGive.length === 0) {
-      return interaction.editReply({ content: '❌ No se pudieron obtener cartas con esos filtros (o el grupo no tiene cartas de esa rareza). Tu pack está a salvo.', ephemeral: true });
+      return interaction.editReply({ content: '❌ No se pudieron obtener cartas con esos filtros (o el grupo/idol no tiene cartas de la rareza que da este pack). Tu pack está a salvo.', ephemeral: true });
     }
 
     // 4. CONSUMIR PACK Y ENTREGAR CARTAS
@@ -177,11 +184,9 @@ module.exports = {
     const cardList = finalCards.map(c => {
       const emojiRarity = rarityEmoji.repeat(c.rarity_level || 1);
       const cleanName = c.name.split(' — ')[0].trim();
-      return `${emojiRarity} ${cleanName} — ${c.group_name || 'sin grupo'} (Era ${c.era || 'desconocida'})\nCode: \`${c.unique_card_id}\``;
-    }).join('\n');
+      return `${emojiRarity} **${cleanName}** — ${c.group_name || 'sin grupo'} (Era ${c.era || 'desconocida'})\nCode: \`${c.unique_card_id}\``;
+    }).join('\n\n');
 
-    return interaction.editReply(`🎉 ${interaction.user.username} abrió ${pack.emoji} ${pack.name} y consiguió:\n${cardList}`);
+    return interaction.editReply(`🎉 ${interaction.user.username} abrió ${pack.emoji} ${pack.name} y consiguió:\n\n${cardList}`);
   }
 };
-
-
