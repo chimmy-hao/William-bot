@@ -4,12 +4,9 @@ const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 // --- CONFIGURACIÓN ---
-const SUCCESS_RATE = 0.30; // 30% de Probabilidad de éxito (Cambia a 0.20 si quieres que sea más difícil)
+const SUCCESS_RATE = 0.30; // 30% de Probabilidad de éxito
 const MAX_USES = 3;        // 3 intentos
 const COOLDOWN_TIME = 24 * 60 * 60 * 1000; // 24 Horas
-
-// Sistema de Cooldown en memoria
-const cooldowns = new Map();
 
 // Función auxiliar para generar ID único
 const generateUniqueCardCode = (baseCode) => {
@@ -27,19 +24,35 @@ module.exports = {
         .setRequired(true)
     ),
 
-async execute(interaction) {
+  async execute(interaction) {
     const userId = interaction.user.id;
-    const botId = '1411218644163231804'; // <--- Aquí pusimos tu ID fijo
+    const botId = '1411218644163231804'; // <--- Tu ID fijo
     const codeInput = interaction.options.getString('code').trim();
-
-    // 1. GESTIÓN DE COOLDOWN (Igual que Licuadora)
     const now = Date.now();
-    let userData = cooldowns.get(userId) || { uses: 0, expiresAt: 0 };
 
-    // Si ya gastó sus usos
-    if (userData.uses >= MAX_USES) {
-      if (now < userData.expiresAt) {
-        const remaining = userData.expiresAt - now;
+    // ---------------------------------------------------------
+    // 1. GESTIÓN DE COOLDOWN (BASE DE DATOS)
+    // ---------------------------------------------------------
+    
+    // Obtener estado actual de la DB
+    let { data: user } = await supabase
+        .from('users')
+        .select('alpha_uses, alpha_reset_time')
+        .eq('user_id', userId)
+        .single();
+    
+    let uses = user?.alpha_uses || 0;
+    let expiresAt = user?.alpha_reset_time || 0;
+
+    // Verificar si el tiempo ya pasó (resetear contadores)
+    if (now > expiresAt) {
+        uses = 0;
+        expiresAt = 0; 
+    }
+
+    // Verificar si agotó los usos
+    if (uses >= MAX_USES) {
+        const remaining = expiresAt - now;
         const hours = Math.floor(remaining / (1000 * 60 * 60));
         const mins = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
         
@@ -47,16 +60,16 @@ async execute(interaction) {
           content: `⏳ **Project Alpha cerrado por hoy.**\nHas agotado tus 3 intentos. Vuelve en **${hours}h ${mins}m**.`, 
           ephemeral: true 
         });
-      } else {
-        // El tiempo pasó, reseteamos
-        userData = { uses: 0, expiresAt: 0 };
-      }
     }
 
     await interaction.deferReply();
 
     try {
-      // 2. VERIFICAR QUE LA CARTA EXISTA Y SEA DEL USUARIO
+      // ---------------------------------------------------------
+      // 2. LÓGICA DEL JUEGO (INTACTA)
+      // ---------------------------------------------------------
+
+      // VERIFICAR QUE LA CARTA EXISTA Y SEA DEL USUARIO
       const { data: cardData, error } = await supabase
         .from('user_cards')
         .select('*, base_cards(*)')
@@ -70,13 +83,12 @@ async execute(interaction) {
 
       const currentRarity = cardData.rarity;
 
-      // 3. VALIDAR QUE NO SEA YA RAREZA MÁXIMA (3)
+      // VALIDAR QUE NO SEA YA RAREZA MÁXIMA (3)
       if (currentRarity >= 3) {
         return interaction.editReply('👑 ¡Esta carta ya es un verdadero **Alpha** (Rareza 3)! No puede ascender más.');
       }
 
-      // 4. TRANSFERIR CARTA AL BOT (El sacrificio ocurre SIEMPRE)
-      // Antes de tirar los dados, la carta ya pasa a ser propiedad de William
+      // TRANSFERIR CARTA AL BOT (El sacrificio ocurre SIEMPRE)
       const { error: moveError } = await supabase
         .from('user_cards')
         .update({ user_id: botId }) 
@@ -86,24 +98,35 @@ async execute(interaction) {
         return interaction.editReply('❌ Error al procesar el sacrificio de la carta.');
       }
 
-      // 5. LA MECÁNICA DE RIESGO (30% Éxito vs 70% Fallo)
+      // LA MECÁNICA DE RIESGO
       const isSuccess = Math.random() < SUCCESS_RATE; 
+
+      // Preparamos los nuevos valores para actualizar la DB (Cooldown)
+      uses += 1;
+      let newExpiresAt = expiresAt;
+      
+      // Si es el primer uso (o se había reseteado), fijamos el tiempo de expiración
+      if (uses === 1 || expiresAt === 0) {
+        newExpiresAt = now + COOLDOWN_TIME;
+      }
 
       // CASO A: FRACASO (ELIMINACIÓN) ❌
       if (!isSuccess) {
-        // Actualizamos cooldown (gastó un intento)
-        userData.uses += 1;
-        if (userData.uses >= MAX_USES) userData.expiresAt = now + COOLDOWN_TIME;
-        cooldowns.set(userId, userData);
+        // Guardar Cooldown en DB
+        await supabase.from('users').upsert({
+            user_id: userId,
+            alpha_uses: uses,
+            alpha_reset_time: newExpiresAt
+        }, { onConflict: 'user_id' });
 
         const embedFail = new EmbedBuilder()
-          .setColor('#2b2b2b') // Gris oscuro (Derrota)
+          .setColor('#2b2b2b') // Gris oscuro
           .setTitle('🐺❌ Eliminado de la Manada')
           .setDescription(
             `La carta **${cardData.base_cards.name}** no superó la prueba.\n` +
             `Ha sido reclamada por William Bot.`
           )
-          .addFields({ name: 'Intentos Restantes', value: `${MAX_USES - userData.uses}/${MAX_USES}` })
+          .addFields({ name: 'Intentos Restantes', value: `${MAX_USES - uses}/${MAX_USES}` })
           .setFooter({ text: 'Better luck next time...' });
 
         return interaction.editReply({ embeds: [embedFail] });
@@ -134,10 +157,12 @@ async execute(interaction) {
         unique_card_id: newUniqueId
       });
 
-      // Actualizamos cooldown también en caso de éxito
-      userData.uses += 1;
-      if (userData.uses >= MAX_USES) userData.expiresAt = now + COOLDOWN_TIME;
-      cooldowns.set(userId, userData);
+      // Guardar Cooldown en DB (También en éxito)
+      await supabase.from('users').upsert({
+        user_id: userId,
+        alpha_uses: uses,
+        alpha_reset_time: newExpiresAt
+      }, { onConflict: 'user_id' });
 
       const embedSuccess = new EmbedBuilder()
         .setColor('#5865F2') // Azul Alpha
@@ -147,7 +172,7 @@ async execute(interaction) {
           { name: 'Sacrificio', value: `~~${cardData.base_cards.name}~~ (R${currentRarity})`, inline: true },
           { name: 'Nueva Alpha', value: `**${newCardBase.name}** (R${nextRarity})`, inline: true },
           { name: 'Código', value: `\`${newUniqueId}\``, inline: false },
-          { name: 'Intentos Restantes', value: `${MAX_USES - userData.uses}/${MAX_USES}` }
+          { name: 'Intentos Restantes', value: `${MAX_USES - uses}/${MAX_USES}` }
         )
         .setImage(newCardBase.image_url);
 
