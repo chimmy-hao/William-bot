@@ -2,7 +2,6 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 
 // --- CONEXIÓN SUPABASE ---
-// Asegúrate de que tu archivo .env esté cargado antes de iniciar el bot
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
@@ -27,8 +26,6 @@ const RECIPES = {
   }
 };
 
-// --- COOLDOWN ---
-const cooldowns = new Map();
 const MAX_USES = 3;
 const COOLDOWN_TIME = 12 * 60 * 60 * 1000; // 12 Horas
 
@@ -46,30 +43,47 @@ module.exports = {
     const userId = interaction.user.id;
     const botId = interaction.client.user.id;
     const codesInput = interaction.options.getString('codes');
-
-    // 1. GESTIÓN DE COOLDOWN
     const now = Date.now();
-    let userData = cooldowns.get(userId) || { uses: 0, expiresAt: 0 };
 
-    if (userData.uses >= MAX_USES) {
-      if (now < userData.expiresAt) {
-        const remaining = userData.expiresAt - now;
+    // ---------------------------------------------------------
+    // 1. GESTIÓN DE COOLDOWN (BASE DE DATOS)
+    // ---------------------------------------------------------
+
+    // Obtener estado actual de la DB
+    let { data: user } = await supabase
+        .from('users')
+        .select('licuadora_uses, licuadora_reset_time')
+        .eq('user_id', userId)
+        .single();
+    
+    // Valores por defecto
+    let uses = user?.licuadora_uses || 0;
+    let expiresAt = user?.licuadora_reset_time || 0;
+
+    // Verificar si el tiempo ya se reinició (pasaron las 12h)
+    if (now > expiresAt) {
+        uses = 0;
+        expiresAt = 0; 
+    }
+
+    // Verificar límite de usos
+    if (uses >= MAX_USES) {
+        const remaining = expiresAt - now;
         const hours = Math.floor(remaining / (1000 * 60 * 60));
         const mins = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
         return interaction.reply({ 
           content: `⏳ **La licuadora se está enfriando.** Vuelve en **${hours}h ${mins}m**.`, 
           ephemeral: true 
         });
-      } else {
-        // Reset cooldown
-        userData = { uses: 0, expiresAt: 0 };
-      }
     }
 
     await interaction.deferReply();
 
     try {
-      // 2. PROCESAR CÓDIGOS
+      // ---------------------------------------------------------
+      // 2. LÓGICA DEL COMANDO (INTACTA)
+      // ---------------------------------------------------------
+      
       const codeList = codesInput.split(/[\s,]+/).filter(c => c.length > 0);
       const uniqueCodes = [...new Set(codeList)];
 
@@ -131,7 +145,6 @@ module.exports = {
       if (moveError) throw moveError;
 
       // B) Dar el Pack al Usuario
-      // NOTA: Usamos 'pack_code' y 'quantity' para coincidir con tu DB
       const { data: currentPack } = await supabase
         .from('user_packs')
         .select('quantity')
@@ -141,7 +154,6 @@ module.exports = {
 
       const newAmount = (currentPack?.quantity || 0) + 1;
 
-      // Upsert corregido con nombres de columnas válidos
       const { error: packError } = await supabase
         .from('user_packs')
         .upsert(
@@ -158,11 +170,25 @@ module.exports = {
         throw packError;
       }
 
-      // 7. ACTUALIZAR COOLDOWN Y CONFIRMAR
-      userData.uses += 1;
-      if (userData.uses >= MAX_USES) userData.expiresAt = now + COOLDOWN_TIME;
-      cooldowns.set(userId, userData);
+      // ---------------------------------------------------------
+      // 7. ACTUALIZAR COOLDOWN EN DB (CAMBIO)
+      // ---------------------------------------------------------
+      uses += 1;
+      let newExpiresAt = expiresAt;
 
+      // Si es el primer uso (o se había reseteado), fijamos el tiempo de expiración
+      if (uses === 1 || expiresAt === 0) {
+        newExpiresAt = now + COOLDOWN_TIME;
+      }
+
+      // Guardamos en Supabase
+      await supabase.from('users').upsert({
+        user_id: userId,
+        licuadora_uses: uses,
+        licuadora_reset_time: newExpiresAt
+      }, { onConflict: 'user_id' });
+
+      // Embed final
       const embed = new EmbedBuilder()
         .setColor('#FFA500')
         .setTitle(`🌪️ ¡Licuadora Completada!`)
@@ -171,7 +197,7 @@ module.exports = {
           { name: 'Resultado', value: `Obtuviste 1x ${recipe.emoji} **${recipe.name}**` },
           { name: 'Inventario', value: 'El pack se ha guardado en tu inventario.' }
         )
-        .setFooter({ text: `Usos restantes hoy: ${MAX_USES - userData.uses}` });
+        .setFooter({ text: `Usos restantes hoy: ${MAX_USES - uses}` });
 
       await interaction.editReply({ embeds: [embed] });
 
