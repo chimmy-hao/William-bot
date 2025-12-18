@@ -8,13 +8,12 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANO
 const ALLOWED_ROLES = ['1413313501694263357', '1412852141197885464'];
 
 // MAPA DE CONFIGURACIÓN
-// Aquí definimos qué columnas de la base de datos se deben poner a 0 para cada comando
+// Define qué columnas poner a 0 para cada comando
 const COMMAND_DB_MAP = {
   'photocard': { last_photocard_claim: 0 },
   'work':      { last_work_claim: 0 },
   'daily':     { last_daily_claim: 0 },
   'weekly':    { last_weekly_claim: 0 },
-  // Alpha y Licuadora resetean tanto los usos como el tiempo
   'alpha':     { alpha_uses: 0, alpha_reset_time: 0 },      
   'licuadora': { licuadora_uses: 0, licuadora_reset_time: 0 } 
 };
@@ -75,7 +74,6 @@ module.exports = {
       await interaction.deferReply();
 
       // 4. Actualizar Supabase directamente
-      // Esto pone las columnas correspondientes en 0 para ese usuario
       const { error } = await supabase
         .from('users')
         .update(updateData)
