@@ -30,21 +30,36 @@ module.exports = {
   cooldowns: cooldowns,
   // -------------------------
 
+// ... imports ...
+const COOLDOWN_TIME = 12 * 60 * 60 * 1000; 
+
+// ELIMINAR: const cooldowns = new Map();
+
+module.exports = {
+  // ... data ...
   async execute(interaction) {
     const userId = interaction.user.id;
     const now = Date.now();
-    const lastUsed = cooldowns.get(userId) || 0;
+
+    // LEER DB
+    let { data: user } = await supabase.from('users').select('*').eq('user_id', userId).single();
+    if(!user) user = { last_daily_claim: 0 }; // Fake user si no existe
+
+    const lastUsed = user.last_daily_claim || 0;
     const remaining = COOLDOWN_TIME - (now - lastUsed);
 
     if (remaining > 0) {
-      const hours = Math.floor(remaining / (1000 * 60 * 60));
-      const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
-      return interaction.reply({
-        content: `⏳ Ya ayudaste a William hoy. Vuelve en **${hours}h ${minutes}m**.`,
-        ephemeral: true
-      });
+       // ... lógica de mostrar tiempo restante ...
+       return interaction.reply(...)
     }
 
+    // ... (Tu código de dar recompensa) ...
+
+    // AL FINAL (ÉXITO):
+    await supabase.from('users').update({ last_daily_claim: now }).eq('user_id', userId);
+    // ... enviar respuesta ...
+  }
+}
     try {
       await interaction.deferReply();
 
