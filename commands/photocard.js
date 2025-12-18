@@ -1,5 +1,4 @@
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
-const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 const { createCanvas, loadImage } = require('@napi-rs/canvas'); 
 
@@ -76,7 +75,7 @@ module.exports = {
       await interaction.deferReply();
 
       // ---------------------------------------------------------
-      // 2. LÓGICA DEL JUEGO (INTACTA)
+      // 2. LÓGICA DEL JUEGO
       // ---------------------------------------------------------
 
       // Determinar Rareza
@@ -172,7 +171,6 @@ module.exports = {
       const rConfig = rarityConfig[level];
       const cleanName = randomCard.name.split(' — ')[0].trim();
       
-      // Intentamos obtener el creador, si no existe la columna en DB usa 'William System'
       const creatorName = randomCard.creator ? `@${randomCard.creator}` : 'William System';
 
       const embed = new EmbedBuilder()
@@ -188,7 +186,6 @@ module.exports = {
           { name: '👤 Propietario', value: `<@${userId}>`, inline: true }
         )
         .setFooter({
-          // AQUÍ ESTÁ EL CAMBIO VISUAL QUE PEDISTE
           text: `Creado por: ${creatorName}\nUsa /inventory para ver tu colección completa`,
           iconURL: interaction.user.displayAvatarURL()
         })
@@ -204,8 +201,6 @@ module.exports = {
 
     } catch (error) {
       console.error('Error en /photocard:', error);
-      // No borramos cooldown de DB aquí para evitar abuso por errores, 
-      // pero si quisieras podrías hacer un update para resetearlo.
       await interaction.editReply('❌ Hubo un error al obtener tu carta. Intenta de nuevo.');
     }
   }
