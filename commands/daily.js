@@ -12,9 +12,6 @@ const REWARD_AMOUNT = 2000;
 const REWARD_RARITY = 2; 
 const moneyEmoji = '<:berrycoin:1411737957081288724>';
 
-// Cooldowns en memoria
-const cooldowns = new Map();
-
 // Función ID único
 const generateUniqueCardCode = (baseCode) => {
   const randomSuffix = Math.floor(1000 + Math.random() * 9000);
@@ -26,40 +23,39 @@ module.exports = {
     .setName('daily')
     .setDescription('📅 Reclama tu recompensa diaria (Cada 12 horas)'),
 
-  // --- LÍNEA PARA EL RESET ---
-  cooldowns: cooldowns,
-  // -------------------------
-
-// ... imports ...
-const COOLDOWN_TIME = 12 * 60 * 60 * 1000; 
-
-// ELIMINAR: const cooldowns = new Map();
-
-module.exports = {
-  // ... data ...
   async execute(interaction) {
     const userId = interaction.user.id;
     const now = Date.now();
 
-    // LEER DB
-    let { data: user } = await supabase.from('users').select('*').eq('user_id', userId).single();
-    if(!user) user = { last_daily_claim: 0 }; // Fake user si no existe
+    // ---------------------------------------------------------
+    // 1. VERIFICACIÓN DE COOLDOWN (BASE DE DATOS)
+    // ---------------------------------------------------------
+    
+    // Leemos si el usuario tiene una fecha guardada
+    let { data: userCheck } = await supabase
+        .from('users')
+        .select('last_daily_claim')
+        .eq('user_id', userId)
+        .single();
 
-    const lastUsed = user.last_daily_claim || 0;
+    // Si no existe el usuario, asumimos 0 para que pueda reclamar y registrarse abajo
+    const lastUsed = userCheck?.last_daily_claim || 0; 
     const remaining = COOLDOWN_TIME - (now - lastUsed);
 
+    // Si falta tiempo, paramos aquí
     if (remaining > 0) {
-       // ... lógica de mostrar tiempo restante ...
-       return interaction.reply(...)
+      const hours = Math.floor(remaining / (1000 * 60 * 60));
+      const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+      return interaction.reply({
+        content: `⏳ Ya ayudaste a William hoy. Vuelve en **${hours}h ${minutes}m**.`,
+        ephemeral: true
+      });
     }
 
-    // ... (Tu código de dar recompensa) ...
+    // ---------------------------------------------------------
+    // 2. LÓGICA DE PREMIO (INTACTA)
+    // ---------------------------------------------------------
 
-    // AL FINAL (ÉXITO):
-    await supabase.from('users').update({ last_daily_claim: now }).eq('user_id', userId);
-    // ... enviar respuesta ...
-  }
-}
     try {
       await interaction.deferReply();
 
@@ -76,7 +72,7 @@ module.exports = {
       const randomCard = rareCards[Math.floor(Math.random() * rareCards.length)];
       const uniqueCode = generateUniqueCardCode(randomCard.card_code);
 
-      // Actualizar Balance
+      // Obtener datos del usuario para el Balance
       let { data: userData } = await supabase
         .from('users')
         .select('balance')
@@ -94,9 +90,13 @@ module.exports = {
 
       const newBalance = (userData.balance || 0) + REWARD_AMOUNT;
 
+      // ACTUALIZAR BALANCE Y EL TIEMPO (Aquí guardamos el cooldown)
       await supabase
         .from('users')
-        .update({ balance: newBalance })
+        .update({ 
+            balance: newBalance,
+            last_daily_claim: now // <--- ESTO GUARDA EL TIEMPO EN LA DB
+        })
         .eq('user_id', userId);
 
       // Entregar carta
@@ -106,8 +106,6 @@ module.exports = {
         rarity: randomCard.rarity_level,
         unique_card_id: uniqueCode
       });
-
-      cooldowns.set(userId, now);
 
       // Enviar GIF y Embed
       try {
