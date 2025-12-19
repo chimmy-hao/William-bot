@@ -1,17 +1,30 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 const moneyEmoji = '<:berrycoin:1411737957081288724>';
 
-// --- BASE DE DATOS DE GIFS (Puedes agregar cientos aquí) ---
+// --- LISTA DE GIFS (Prioridad) ---
 const williamGifs = [
-    'https://media.tenor.com/2fJj2R2q4wEAAAAC/william-jakrapatr.gif', 
-    'https://media.tenor.com/uN2jX7q1wEAAAAC/project-alpha-william.gif',
-    'https://64.media.tumblr.com/7a68369e96024949510168925501865a/d5d2999426f3080e-31/s540x810/3741009852264585640203099080517700206195.gif',
-    'https://media.tenor.com/images/3342345/william-smile.gif', // (Ejemplo, agrega tus links reales aquí)
-    'https://media.tenor.com/P5Q4X1wEAAAAC/lykn-william.gif'
+    'https://media.tenor.com/oDi9vuSDFn8AAAAM/williamjkp-williamest.gif',
+    'https://media.tenor.com/2LpVedAVi88AAAAM/williamjkp-lykn-william.gif',
+    'https://media.tenor.com/O0BIiNbkxeMAAAAM/williamjkp-william-jkp.gif',
+    'https://media.tenor.com/hLNjARrdJWwAAAAM/sassy-william-williamjkp-aneexwe.gif',
+    'https://media.tenor.com/rkYYqR1JaX8AAAAM/williamjkp-tuilover.gif',
+    'https://media.tenor.com/D4hYl7LjNhIAAAA1/williamjkp-williamest.gif',
+    'https://media.tenor.com/5jczFlfwb1MAAAAM/williamjkp-williamlykn.gif',
+    'https://media.tenor.com/iewm3JkU8voAAAAM/babygirl-william-williamjkp-aneexwe.gif',
+    'https://media.tenor.com/wJjoKm3PVq4AAAAM/lykn-williamjkp.gif',
+    'https://media.tenor.com/TC3L3Zw1o30AAAAM/lykn-williamjkp.gif',
+    'https://media.tenor.com/NmYJlXKZObIAAAAM/william-jkp-est-supha.gif',
+    'https://media.tenor.com/yeQx53aqTkgAAAAM/williamest-william-jakrapatr.gif',
+    'https://media.tenor.com/34X9eRqlj7AAAAAM/williamest-william-jakrapatr.gif',
+    'https://media.tenor.com/GqjoloWQ_CQAAAAM/william-jakrapatr-williamest.gif',
+    'https://media.tenor.com/EyppIOnQ_RkAAAA1/williamest-william-jakrapatr.gif',
+    'https://media.tenor.com/OxjMIY5IMXsAAAAM/william-jakrapatr-williamjkp.gif',
+    'https://media.tenor.com/6-kM3CW9wskAAAAM/william-lykn-lykn.gif',
+    'https://media.tenor.com/Vt2Qi3C5p4QAAAAM/williamjkp-william-lykn.gif'
 ];
 
 // Configuración de textos
@@ -30,35 +43,33 @@ module.exports = {
     const userId = interaction.user.id;
     const now = Date.now();
 
-    // ---------------------------------------------------------
-    // 1. VERIFICACIÓN DE COOLDOWN
-    // ---------------------------------------------------------
-    let { data: userCheck } = await supabase
-        .from('users')
-        .select('last_work_claim')
-        .eq('user_id', userId)
-        .single();
-    
-    const lastUsed = userCheck?.last_work_claim || 0;
-    const remaining = COOLDOWN_TIME - (now - lastUsed);
-
-    if (remaining > 0) {
-      const minutes = Math.floor(remaining / 60000);
-      const seconds = Math.floor((remaining % 60000) / 1000);
-      return interaction.reply({
-        content: `⏳ Debes esperar **${minutes}m ${seconds}s** antes de volver a usar \`/work\`.`,
-        ephemeral: true
-      });
-    }
-
     try {
+      // 1. VERIFICACIÓN DE COOLDOWN
+      let { data: userCheck } = await supabase
+          .from('users')
+          .select('last_work_claim')
+          .eq('user_id', userId)
+          .single();
+      
+      const lastUsed = userCheck?.last_work_claim || 0;
+      const remaining = COOLDOWN_TIME - (now - lastUsed);
+
+      if (remaining > 0) {
+        const minutes = Math.floor(remaining / 60000);
+        const seconds = Math.floor((remaining % 60000) / 1000);
+        return interaction.reply({
+          content: `⏳ Debes esperar **${minutes}m ${seconds}s** antes de volver a usar \`/work\`.`,
+          ephemeral: true
+        });
+      }
+
       await interaction.deferReply();
 
-      // Obtener datos del usuario
+      // 2. OBTENER USUARIO
       const { data: user, error: userError } = await supabase.from('users').select('*').eq('user_id', userId).single();
       if (userError || !user) return interaction.editReply('❌ No encontré tu perfil. Usa `/photocard` primero.');
 
-      // Determinar nombre del Idol
+      // 3. DATOS DEL IDOL FAVORITO
       let idolName = 'tu idol favorito';
       if (user.favorite_card_id) {
         const { data: favCard } = await supabase
@@ -72,33 +83,26 @@ module.exports = {
         }
       }
 
-      // Generar historia y recompensa
+      // 4. GENERAR TEXTOS
       const location = locations[Math.floor(Math.random() * locations.length)];
       const job = jobs[Math.floor(Math.random() * jobs.length)];
       const outcome = outcomes[Math.floor(Math.random() * outcomes.length)];
       const reward = Math.floor(Math.random() * 51) + 100;
-      const newBalance = user.balance + reward;
+      const newBalance = (user.balance || 0) + reward;
 
-      // ---------------------------------------------------------
-      // 2. ACTUALIZACIÓN DB + NOTIFICACIÓN + HISTORIAL
-      // ---------------------------------------------------------
-
-      // A) Actualizar saldo, tiempo y RESETEAR NOTIFICACIÓN (work_notified: false)
+      // 5. ACTUALIZAR DB + NOTIFICACIÓN
       const { error: updateError } = await supabase
         .from('users')
         .update({ 
             balance: newBalance,
             last_work_claim: now,
-            work_notified: false // <--- 🔔 IMPORTANTE: Activa el aviso futuro
+            work_notified: false // <--- 🔔 Activa aviso futuro
         })
         .eq('user_id', userId);
 
-      if (updateError) {
-        console.error('Error DB:', updateError);
-        return interaction.editReply('❌ Error al guardar datos.');
-      }
+      if (updateError) throw updateError;
 
-      // B) Guardar en Historial
+      // 6. HISTORIAL
       await supabase.from('history_logs').insert({
           user_id: userId,
           action_type: 'work',
@@ -106,17 +110,8 @@ module.exports = {
           details: `Trabajó como ${job} en ${location}`
       });
 
-      // ---------------------------------------------------------
-      // 3. RESPUESTA VISUAL (GIF ALEATORIO)
-      // ---------------------------------------------------------
-
-      // Seleccionar un GIF aleatorio de la lista
-      // Si la lista falla por algo, usa un placeholder seguro
-      const randomGif = williamGifs.length > 0 
-        ? williamGifs[Math.floor(Math.random() * williamGifs.length)] 
-        : 'https://media.tenor.com/2fJj2R2q4wEAAAAC/william-jakrapatr.gif';
-
-      const embed = new EmbedBuilder()
+      // 7. SELECCIÓN DE GIF CON RESPALDO (FALLBACK)
+      let embed = new EmbedBuilder()
         .setColor('#f1c40f')
         .setTitle('💼 Work Result')
         .setDescription(
@@ -125,14 +120,32 @@ module.exports = {
             `${interaction.user.username} earned **${reward} ${moneyEmoji}**, now they have **${newBalance} ${moneyEmoji}**.\n` +
             `In the end, ${outcome}`
         )
-        .setImage(randomGif) // <--- Usamos el link directo, ya no attachment
         .setTimestamp();
 
-      await interaction.editReply({ embeds: [embed] }); // Quitamos 'files: []'
+      const filesToSend = [];
+
+      // LÓGICA: Si hay GIFs en la lista, usamos uno random.
+      // Si la lista está vacía, usamos el archivo local './work.gif' como respaldo.
+      if (williamGifs && williamGifs.length > 0) {
+          const randomGif = williamGifs[Math.floor(Math.random() * williamGifs.length)];
+          embed.setImage(randomGif);
+      } else {
+          // Fallback: Archivo Local
+          const attachment = new AttachmentBuilder('./work.gif');
+          embed.setImage('attachment://work.gif');
+          filesToSend.push(attachment);
+      }
+
+      await interaction.editReply({ embeds: [embed], files: filesToSend });
 
     } catch (err) {
       console.error('Error en /work:', err);
-      await interaction.editReply('❌ Hubo un error al ejecutar /work.');
+      // Evitamos dejar al usuario esperando si hubo error
+      if (!interaction.deferred && !interaction.replied) {
+          await interaction.reply({ content: '❌ Ocurrió un error inesperado.', ephemeral: true });
+      } else {
+          await interaction.editReply('❌ Ocurrió un error inesperado al procesar el trabajo.');
+      }
     }
   }
 };
