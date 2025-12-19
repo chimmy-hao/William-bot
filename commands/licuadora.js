@@ -49,18 +49,17 @@ module.exports = {
     // 1. GESTIÓN DE COOLDOWN (BASE DE DATOS)
     // ---------------------------------------------------------
 
-    // Obtener estado actual de la DB
+    // Obtener estado actual
     let { data: user } = await supabase
         .from('users')
         .select('licuadora_uses, licuadora_reset_time')
         .eq('user_id', userId)
         .single();
     
-    // Valores por defecto
     let uses = user?.licuadora_uses || 0;
     let expiresAt = user?.licuadora_reset_time || 0;
 
-    // Verificar si el tiempo ya se reinició (pasaron las 12h)
+    // Verificar reset de tiempo
     if (now > expiresAt) {
         uses = 0;
         expiresAt = 0; 
@@ -81,7 +80,7 @@ module.exports = {
 
     try {
       // ---------------------------------------------------------
-      // 2. LÓGICA DEL COMANDO (INTACTA)
+      // 2. LÓGICA DEL COMANDO
       // ---------------------------------------------------------
       
       const codeList = codesInput.split(/[\s,]+/).filter(c => c.length > 0);
@@ -89,7 +88,7 @@ module.exports = {
 
       if (uniqueCodes.length === 0) return interaction.editReply('❌ No ingresaste ningún código válido.');
 
-      // 3. BUSCAR CARTAS EN SUPABASE
+      // 3. BUSCAR CARTAS
       const { data: cards, error } = await supabase
         .from('user_cards')
         .select('id, unique_card_id, rarity') 
@@ -109,13 +108,14 @@ module.exports = {
         if (counts[r] !== undefined) counts[r]++;
       });
 
-      // 5. VERIFICAR SI COINCIDE CON ALGUNA RECETA
+      // 5. VERIFICAR RECETA
       let matchedPack = null;
 
       for (const [key, recipe] of Object.entries(RECIPES)) {
         const r = recipe.required;
         if (counts[1] === r[1] && counts[2] === r[2] && counts[3] === r[3]) {
           matchedPack = key;
+          matchedPackKey = key; // Guardamos la key para usarla luego
           break; 
         }
       }
@@ -144,7 +144,7 @@ module.exports = {
       
       if (moveError) throw moveError;
 
-      // B) Dar el Pack al Usuario
+      // B) Dar el Pack
       const { data: currentPack } = await supabase
         .from('user_packs')
         .select('quantity')
@@ -165,28 +165,39 @@ module.exports = {
             { onConflict: 'user_id, pack_code' }
         );
 
-      if (packError) {
-        console.error("Error al dar pack:", packError);
-        throw packError;
-      }
+      if (packError) throw packError;
 
       // ---------------------------------------------------------
-      // 7. ACTUALIZAR COOLDOWN EN DB (CAMBIO)
+      // 7. ACTUALIZAR COOLDOWN + NOTIFICACIÓN + HISTORIAL
       // ---------------------------------------------------------
       uses += 1;
       let newExpiresAt = expiresAt;
 
-      // Si es el primer uso (o se había reseteado), fijamos el tiempo de expiración
       if (uses === 1 || expiresAt === 0) {
         newExpiresAt = now + COOLDOWN_TIME;
       }
 
-      // Guardamos en Supabase
-      await supabase.from('users').upsert({
+      // Preparar updates usuario
+      let userUpdates = {
         user_id: userId,
         licuadora_uses: uses,
         licuadora_reset_time: newExpiresAt
-      }, { onConflict: 'user_id' });
+      };
+
+      // 🔔 AVISO SOLO SI GASTA EL ÚLTIMO USO
+      if (uses >= MAX_USES) {
+          userUpdates.licuadora_notified = false;
+      }
+
+      await supabase.from('users').upsert(userUpdates, { onConflict: 'user_id' });
+
+      // 📜 HISTORIAL
+      await supabase.from('history_logs').insert({
+          user_id: userId,
+          action_type: 'licuadora',
+          amount: 1,
+          details: `Crafting: Creó 1x ${recipe.name} usando ${cards.length} cartas`
+      });
 
       // Embed final
       const embed = new EmbedBuilder()
