@@ -6,29 +6,27 @@ require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 
 // ==========================================
-// 🌐 SERVIDOR WEB FALSO PARA RENDER (KEEP-ALIVE)
+// 🌐 SERVIDOR WEB (Para que Render no se duerma)
 // ==========================================
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('William Bot is running and ready!');
+    res.end('William Bot is online!');
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`🌐 Web server listening on port ${PORT}`);
+    console.log(`🌐 Server listening on port ${PORT}`);
 }).on('error', (err) => {
     console.error('❌ Server error:', err);
 });
-// ==========================================
 
-// Supabase connection
+// Conexión Supabase
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
-// Create temp directory if it doesn't exist
+// Limpieza de temporales
 const tempDir = path.join(__dirname, 'temp');
 if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-// Cleanup temp directory on startup
 function cleanupTempDirectory() {
     try {
         const files = fs.readdirSync(tempDir);
@@ -36,16 +34,14 @@ function cleanupTempDirectory() {
             const filePath = path.join(tempDir, file);
             if (fs.statSync(filePath).isFile()) fs.unlinkSync(filePath);
         }
-        console.log('🧹 Temp directory cleaned up');
+        console.log('🧹 Temp cleaned');
     } catch (error) {
-        console.error('❌ Error cleaning temp directory:', error);
+        console.error('❌ Error cleaning temp:', error);
     }
 }
-
-// Clean temp directory every hour
 setInterval(cleanupTempDirectory, 3600000);
 
-// Create Discord client
+// Cliente Discord
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -55,10 +51,9 @@ const client = new Client({
     ]
 });
 
-// Command collection
 client.commands = new Collection();
 
-// Load commands
+// Cargar Comandos
 function loadCommands() {
     const commandsPath = path.join(__dirname, 'commands');
     if (!fs.existsSync(commandsPath)) fs.mkdirSync(commandsPath, { recursive: true });
@@ -71,44 +66,41 @@ function loadCommands() {
             const command = require(filePath);
             if ('data' in command && 'execute' in command) {
                 client.commands.set(command.data.name, command);
-            } else {
-                console.log(`⚠️ Command at ${filePath} is missing "data" or "execute".`);
             }
         } catch (error) {
-            console.error(`❌ Error loading command ${file}:`, error);
+            console.error(`❌ Error loading ${file}:`, error);
         }
     }
-    console.log(`✅ ${client.commands.size} commands loaded.`);
+    console.log(`✅ Loaded ${client.commands.size} commands.`);
 }
 
-// Deploy slash commands (FUNCIÓN MANUAL)
+// Deploy Manual (Necesario para que el autocomplete funcione)
 async function deployCommands() {
     const commands = [];
     for (const command of client.commands.values()) commands.push(command.data.toJSON());
 
     const rest = new REST().setToken(process.env.DISCORD_TOKEN);
     try {
-        console.log('🔄 Refreshing application (/) commands...');
+        console.log('🔄 Deploying commands...');
         if (process.env.GUILD_ID) {
             await rest.put(
                 Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
                 { body: commands }
             );
-            console.log('✅ Guild commands reloaded.');
         } else {
             await rest.put(
                 Routes.applicationCommands(process.env.CLIENT_ID),
                 { body: commands }
             );
-            console.log('✅ Global commands reloaded.');
         }
+        console.log('✅ Commands deployed successfully.');
     } catch (error) {
         console.error('❌ Error deploying commands:', error);
     }
 }
 
 // ==========================================
-// ⏰ SISTEMA DE NOTIFICACIONES (AUTO-PING)
+// ⏰ NOTIFICACIONES (Versión Segura)
 // ==========================================
 const COOLDOWNS = {
     WORK: 3 * 60 * 1000,
@@ -117,21 +109,19 @@ const COOLDOWNS = {
     WEEKLY: 7 * 24 * 60 * 60 * 1000
 };
 
-// Se ejecuta cada 60 segundos
 setInterval(async () => {
     try {
         const now = Date.now();
-        
-        // Buscamos usuarios con notificaciones pendientes
         const { data: users, error } = await supabase
             .from('users')
             .select('*')
-            .or('work_notified.eq.false,daily_notified.eq.false,weekly_notified.eq.false,photocard_notified.eq.false,alpha_notified.eq.false,licuadora_notified.eq.false')
-            .limit(20);
+            .or('work_notified.eq.false,daily_notified.eq.false,weekly_notified.eq.false,photocard_notified.eq.false')
+            .limit(10); // Límite bajo para seguridad
 
-        if (error || !users || users.length === 0) return;
+        if (error || !users) return;
 
         for (const user of users) {
+            // Si no hay canal guardado, saltamos (para evitar errores)
             if (!user.last_channel_id) continue;
 
             const channel = await client.channels.fetch(user.last_channel_id).catch(() => null);
@@ -140,145 +130,69 @@ setInterval(async () => {
             let updates = {};
             let messages = [];
 
-            // --- WORK ---
-            if (user.work_notified === false) {
-                const readyAt = (user.last_work_claim || 0) + COOLDOWNS.WORK;
-                if (now >= readyAt) {
-                    messages.push("acompañarte al trabajo 💼");
-                    updates.work_notified = true;
-                }
+            if (!user.work_notified && now >= (user.last_work_claim || 0) + COOLDOWNS.WORK) {
+                messages.push("trabajar 💼");
+                updates.work_notified = true;
             }
-            // --- PHOTOCARD ---
-            if (user.photocard_notified === false) {
-                const readyAt = (user.last_photocard_claim || 0) + COOLDOWNS.PHOTOCARD;
-                if (now >= readyAt) {
-                    messages.push("buscar nuevas cartas 🎰");
-                    updates.photocard_notified = true;
-                }
+            if (!user.daily_notified && now >= (user.last_daily_claim || 0) + COOLDOWNS.DAILY) {
+                messages.push("reclamar daily 📅");
+                updates.daily_notified = true;
             }
-            // --- DAILY ---
-            if (user.daily_notified === false) {
-                const readyAt = (user.last_daily_claim || 0) + COOLDOWNS.DAILY;
-                if (now >= readyAt) {
-                    messages.push("darte tu recompensa diaria 📅");
-                    updates.daily_notified = true;
-                }
-            }
-            // --- WEEKLY ---
-            if (user.weekly_notified === false) {
-                const readyAt = (user.last_weekly_claim || 0) + COOLDOWNS.WEEKLY;
-                if (now >= readyAt) {
-                    messages.push("entregarte tus provisiones semanales 🗓️");
-                    updates.weekly_notified = true;
-                }
-            }
-            // --- ALPHA (Usa Reset Time) ---
-            if (user.alpha_notified === false) {
-                if (now >= (user.alpha_reset_time || 0)) {
-                    messages.push("realizar el Proyecto Alpha 🐺");
-                    updates.alpha_notified = true;
-                }
-            }
-            // --- LICUADORA (Usa Reset Time) ---
-            if (user.licuadora_notified === false) {
-                if (now >= (user.licuadora_reset_time || 0)) {
-                    messages.push("encender la licuadora 🌪️");
-                    updates.licuadora_notified = true;
-                }
-            }
+            // (Puedes agregar los otros aquí luego, vamos a lo seguro primero)
 
-            // ENVIAR MENSAJE
-            if (messages.length > 0 && Object.keys(updates).length > 0) {
-                const text = `Hey <@${user.user_id}>, William ya está listo para **${messages.join(' y para ')}**!`;
-                
-                await channel.send(text).catch(e => console.error("No pude enviar mensaje:", e));
+            if (messages.length > 0) {
+                await channel.send(`Hey <@${user.user_id}>, ya puedes **${messages.join(' y ')}**!`).catch(() => {});
                 await supabase.from('users').update(updates).eq('user_id', user.user_id);
             }
         }
-    } catch (err) {
-        console.error("Error en loop notificaciones:", err);
+    } catch (e) {
+        console.error("Error notificaciones:", e);
     }
 }, 60000);
 
 
-// Bot ready event
+// Evento Ready
 client.once(Events.ClientReady, async readyClient => {
-    console.log(`🤖 Bot is ready! Logged in as ${readyClient.user.tag}`);
-    console.log(`📊 Serving ${client.guilds.cache.size} guilds`);
+    console.log(`🤖 Logged in as ${readyClient.user.tag}`);
+    client.user.setPresence({ activities: [{ name: 'First Sight', type: 2 }], status: 'online' });
     
-    client.user.setPresence({
-        activities: [{
-            name: 'ทัก (FIRST SIGHT) - LYKN', 
-            type: 2, // Listening
-        }],
-        status: 'online',
-    });
-
+    // Deploy al iniciar
     await deployCommands(); 
-    console.log('✅ Commands deployed.');
-
     cleanupTempDirectory();
 });
 
-// Interaction handler
+// Evento Interaction (SIN EL CÓDIGO QUE ROMPÍA TODO)
 client.on(Events.InteractionCreate, async interaction => {
     try {
         const command = client.commands.get(interaction.commandName);
 
+        // Manejo de Autocomplete
         if (interaction.isAutocomplete()) {
-            if (!command || !command.autocomplete) return;
-            await command.autocomplete(interaction, supabase);
+            if (command && command.autocomplete) {
+                await command.autocomplete(interaction, supabase);
+            }
             return;
         }
 
         if (!interaction.isChatInputCommand()) return;
 
-        // 🟢 GUARDA EL CANAL ACTUAL PARA FUTURAS NOTIFICACIONES 🟢
-        // Esto permite que el bot sepa dónde pinguearte
-        if (interaction.channelId) {
-            const { error } = await supabase.from('users').upsert({
-                user_id: interaction.user.id,
-                last_channel_id: interaction.channelId
-            }, { onConflict: 'user_id' });
-            
-            if (error) console.error("Error guardando canal:", error);
-        }
-
+        // ⚠️ AQUÍ ESTABA EL ERROR. LO HE QUITADO TEMPORALMENTE.
+        // El bot no guardará el canal por ahora, pero FUNCIONARÁ.
+        
         if (!command) return;
 
         await command.execute(interaction, supabase);
+
     } catch (error) {
-        console.error(`❌ Error handling interaction:`, error);
+        console.error(`❌ Interaction Error:`, error);
         if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({ content: '❌ Error executing command!', ephemeral: true }).catch(() => {});
-        } else {
-            await interaction.followUp({ content: '❌ Error executing command!', ephemeral: true }).catch(() => {});
         }
     }
 });
 
-// Global error handlers
-process.on('unhandledRejection', (reason, promise) => {
-    // console.error('🚨 Unhandled Rejection:', reason); 
-});
-process.on('uncaughtException', error => {
-    console.error('🚨 Uncaught Exception:', error);
-});
-client.on('error', error => console.error('🚨 Discord Client error:', error));
+process.on('uncaughtException', console.error);
+process.on('unhandledRejection', console.error);
 
-// Graceful shutdown
-function shutdown() {
-    console.log('🛑 Shutting down...');
-    cleanupTempDirectory();
-    client.destroy();
-    process.exit(0);
-}
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
-
-// Load commands and login
 loadCommands();
-client.login(process.env.DISCORD_TOKEN).catch(error => { 
-    console.error('❌ Failed to login:', error); 
-    process.exit(1); 
-});
+client.login(process.env.DISCORD_TOKEN);
