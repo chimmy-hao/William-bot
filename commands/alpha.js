@@ -4,8 +4,8 @@ const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 // --- CONFIGURACIÓN ---
-const SUCCESS_RATE = 0.30; // 30% de Probabilidad de éxito
-const MAX_USES = 3;        // 3 intentos
+const SUCCESS_RATE = 0.17; // 17% de Probabilidad de éxito (Hardcore)
+const MAX_USES = 3;        // 3 intentos diarios
 const COOLDOWN_TIME = 24 * 60 * 60 * 1000; // 24 Horas
 
 // Función auxiliar para generar ID único
@@ -17,7 +17,7 @@ const generateUniqueCardCode = (baseCode) => {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('alpha')
-    .setDescription('🐺 Project Alpha: Arriesga una carta para evolucionarla (30% Éxito / 70% Pierdes).')
+    .setDescription('🐺 Project Alpha: Arriesga una carta para evolucionarla (17% Éxito / 83% Pierdes).')
     .addStringOption(option => 
       option.setName('code')
         .setDescription('El código de la carta que quieres enviar a competir')
@@ -26,7 +26,7 @@ module.exports = {
 
   async execute(interaction) {
     const userId = interaction.user.id;
-    const botId = '1411218644163231804'; // <--- Tu ID fijo
+    const botId = '1411218644163231804'; // ID del Bot
     const codeInput = interaction.options.getString('code').trim();
     const now = Date.now();
 
@@ -34,7 +34,7 @@ module.exports = {
     // 1. GESTIÓN DE COOLDOWN (BASE DE DATOS)
     // ---------------------------------------------------------
     
-    // Obtener estado actual de la DB
+    // Obtener estado actual
     let { data: user } = await supabase
         .from('users')
         .select('alpha_uses, alpha_reset_time')
@@ -44,7 +44,7 @@ module.exports = {
     let uses = user?.alpha_uses || 0;
     let expiresAt = user?.alpha_reset_time || 0;
 
-    // Verificar si el tiempo ya pasó (resetear contadores)
+    // Verificar reset de tiempo
     if (now > expiresAt) {
         uses = 0;
         expiresAt = 0; 
@@ -66,10 +66,9 @@ module.exports = {
 
     try {
       // ---------------------------------------------------------
-      // 2. LÓGICA DEL JUEGO (INTACTA)
+      // 2. VALIDAR CARTA
       // ---------------------------------------------------------
 
-      // VERIFICAR QUE LA CARTA EXISTA Y SEA DEL USUARIO
       const { data: cardData, error } = await supabase
         .from('user_cards')
         .select('*, base_cards(*)')
@@ -83,12 +82,13 @@ module.exports = {
 
       const currentRarity = cardData.rarity;
 
-      // VALIDAR QUE NO SEA YA RAREZA MÁXIMA (3)
       if (currentRarity >= 3) {
         return interaction.editReply('👑 ¡Esta carta ya es un verdadero **Alpha** (Rareza 3)! No puede ascender más.');
       }
 
-      // TRANSFERIR CARTA AL BOT (El sacrificio ocurre SIEMPRE)
+      // ---------------------------------------------------------
+      // 3. SACRIFICIO (Transferir al Bot)
+      // ---------------------------------------------------------
       const { error: moveError } = await supabase
         .from('user_cards')
         .update({ user_id: botId }) 
@@ -98,29 +98,46 @@ module.exports = {
         return interaction.editReply('❌ Error al procesar el sacrificio de la carta.');
       }
 
-      // LA MECÁNICA DE RIESGO
+      // ---------------------------------------------------------
+      // 4. RESULTADO DEL JUEGO
+      // ---------------------------------------------------------
       const isSuccess = Math.random() < SUCCESS_RATE; 
 
-      // Preparamos los nuevos valores para actualizar la DB (Cooldown)
+      // Preparar actualización de usuario
       uses += 1;
       let newExpiresAt = expiresAt;
       
-      // Si es el primer uso (o se había reseteado), fijamos el tiempo de expiración
+      // Si es el primer uso del ciclo, fijamos el tiempo de expiración
       if (uses === 1 || expiresAt === 0) {
         newExpiresAt = now + COOLDOWN_TIME;
       }
 
-      // CASO A: FRACASO (ELIMINACIÓN) ❌
+      // OBJETO DE ACTUALIZACIÓN (Común para éxito y fallo)
+      let userUpdates = {
+          user_id: userId,
+          alpha_uses: uses,
+          alpha_reset_time: newExpiresAt
+      };
+
+      // 🔔 SOLO ACTIVAR AVISO AL GASTAR EL ÚLTIMO INTENTO
+      if (uses >= MAX_USES) {
+          userUpdates.alpha_notified = false;
+      }
+
+      // --- CAMINO A: FRACASO ❌ ---
       if (!isSuccess) {
-        // Guardar Cooldown en DB
-        await supabase.from('users').upsert({
+        // Actualizar Usuario
+        await supabase.from('users').upsert(userUpdates, { onConflict: 'user_id' });
+
+        // 📜 Historial (Derrota)
+        await supabase.from('history_logs').insert({
             user_id: userId,
-            alpha_uses: uses,
-            alpha_reset_time: newExpiresAt
-        }, { onConflict: 'user_id' });
+            action_type: 'alpha_fail',
+            details: `Alpha Fallo: Sacrificó ${cardData.base_cards.name} (${currentRarity}⭐)`
+        });
 
         const embedFail = new EmbedBuilder()
-          .setColor('#2b2b2b') // Gris oscuro
+          .setColor('#2b2b2b')
           .setTitle('🐺❌ Eliminado de la Manada')
           .setDescription(
             `La carta **${cardData.base_cards.name}** no superó la prueba.\n` +
@@ -132,24 +149,24 @@ module.exports = {
         return interaction.editReply({ embeds: [embedFail] });
       }
 
-      // CASO B: ÉXITO (ASCENSO ALPHA) 🐺🌕
+      // --- CAMINO B: ÉXITO 🐺🌕 ---
       
       const nextRarity = currentRarity + 1;
       
-      // Buscamos carta de nivel superior
+      // Buscar carta upgrade
       const { data: possibleUpgrades } = await supabase
         .from('base_cards')
         .select('*')
         .eq('rarity_level', nextRarity);
 
       if (!possibleUpgrades || possibleUpgrades.length === 0) {
-        return interaction.editReply('⚠️ ¡Has ganado! Pero hubo un error buscando la carta de premio en la base de datos.');
+        return interaction.editReply('⚠️ ¡Has ganado! Pero hubo un error buscando la carta de premio.');
       }
 
       const newCardBase = possibleUpgrades[Math.floor(Math.random() * possibleUpgrades.length)];
       const newUniqueId = generateUniqueCardCode(newCardBase.card_code);
 
-      // Insertamos la nueva carta mejorada al usuario
+      // Entregar carta nueva
       await supabase.from('user_cards').insert({
         user_id: userId,
         card_id: newCardBase.id,
@@ -157,15 +174,18 @@ module.exports = {
         unique_card_id: newUniqueId
       });
 
-      // Guardar Cooldown en DB (También en éxito)
-      await supabase.from('users').upsert({
+      // Actualizar Usuario (Cooldown)
+      await supabase.from('users').upsert(userUpdates, { onConflict: 'user_id' });
+
+      // 📜 Historial (Victoria)
+      await supabase.from('history_logs').insert({
         user_id: userId,
-        alpha_uses: uses,
-        alpha_reset_time: newExpiresAt
-      }, { onConflict: 'user_id' });
+        action_type: 'alpha_win',
+        details: `Alpha Éxito: ${cardData.base_cards.name} -> ${newCardBase.name} (${nextRarity}⭐)`
+      });
 
       const embedSuccess = new EmbedBuilder()
-        .setColor('#5865F2') // Azul Alpha
+        .setColor('#5865F2')
         .setTitle('🐺🌕 ¡Ascenso Alpha Exitoso!')
         .setDescription(`¡Un aullido de victoria! Tu carta ha evolucionado.`)
         .addFields(
