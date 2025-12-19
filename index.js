@@ -6,7 +6,7 @@ require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 
 // ==========================================
-// 🌐 SERVIDOR WEB (Keep-Alive)
+// 🌐 SERVIDOR WEB
 // ==========================================
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -53,7 +53,6 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// Cargar Comandos
 function loadCommands() {
     const commandsPath = path.join(__dirname, 'commands');
     if (!fs.existsSync(commandsPath)) fs.mkdirSync(commandsPath, { recursive: true });
@@ -74,7 +73,6 @@ function loadCommands() {
     console.log(`✅ Loaded ${client.commands.size} commands.`);
 }
 
-// Deploy Manual
 async function deployCommands() {
     const commands = [];
     for (const command of client.commands.values()) commands.push(command.data.toJSON());
@@ -100,7 +98,7 @@ async function deployCommands() {
 }
 
 // ==========================================
-// ⏰ NOTIFICACIONES (Sistema Completo)
+// ⏰ NOTIFICACIONES INTELIGENTES (GRANULARES)
 // ==========================================
 const COOLDOWNS = {
     WORK: 3 * 60 * 1000,
@@ -113,61 +111,96 @@ setInterval(async () => {
     try {
         const now = Date.now();
         
-        // --- 🔍 CAMBIO CLAVE AQUÍ ---
-        // Buscamos usuarios con notificaciones pendientes Y ACTIVADAS
+        // 1. Buscamos a cualquiera que tenga algo pendiente (notified = false)
+        // Ya no filtramos por 'reminders_enabled' global, lo hacemos individualmente abajo.
         const { data: users, error } = await supabase
             .from('users')
             .select('*')
-            // Esta línea asegura que el comando /notifications funcione:
-            .eq('reminders_enabled', true) 
             .or('work_notified.eq.false,daily_notified.eq.false,weekly_notified.eq.false,photocard_notified.eq.false,alpha_notified.eq.false,licuadora_notified.eq.false')
-            .limit(20);
+            .limit(30); // Aumentamos un poco el límite para procesar mejor
 
         if (error || !users || users.length === 0) return;
 
         for (const user of users) {
+            // Si no hay canal, saltamos
             if (!user.last_channel_id) continue;
-
-            const channel = await client.channels.fetch(user.last_channel_id).catch(() => null);
-            if (!channel) continue;
 
             let updates = {};
             let messages = [];
+            let shouldSend = false; // Bandera para saber si enviar mensaje o solo actualizar silencioso
 
+            // --- FUNCIÓN AUXILIAR PARA CHEQUEAR ---
+            // Si ya pasó el tiempo:
+            // - Si el usuario quiere aviso (pref_X = true) -> Agregamos mensaje.
+            // - Si NO quiere aviso (pref_X = false) -> Solo marcamos como true en la DB (Silencio).
+            
             // WORK
             if (user.work_notified === false && now >= (user.last_work_claim || 0) + COOLDOWNS.WORK) {
-                messages.push("trabajar 💼");
-                updates.work_notified = true;
-            }
-            // PHOTOCARD
-            if (user.photocard_notified === false && now >= (user.last_photocard_claim || 0) + COOLDOWNS.PHOTOCARD) {
-                messages.push("buscar cartas 🎰");
-                updates.photocard_notified = true;
-            }
-            // DAILY
-            if (user.daily_notified === false && now >= (user.last_daily_claim || 0) + COOLDOWNS.DAILY) {
-                messages.push("reclamar daily 📅");
-                updates.daily_notified = true;
-            }
-            // WEEKLY
-            if (user.weekly_notified === false && now >= (user.last_weekly_claim || 0) + COOLDOWNS.WEEKLY) {
-                messages.push("reclamar pack semanal 🗓️");
-                updates.weekly_notified = true;
-            }
-            // ALPHA
-            if (user.alpha_notified === false && now >= (user.alpha_reset_time || 0)) {
-                messages.push("intentar Proyecto Alpha 🐺");
-                updates.alpha_notified = true;
-            }
-            // LICUADORA
-            if (user.licuadora_notified === false && now >= (user.licuadora_reset_time || 0)) {
-                messages.push("usar la Licuadora 🌪️");
-                updates.licuadora_notified = true;
+                updates.work_notified = true; // Siempre marcamos como "procesado"
+                if (user.pref_work !== false) { // Si es true o null (default), avisamos
+                     messages.push("trabajar 💼");
+                     shouldSend = true;
+                }
             }
 
-            // ENVIAR
-            if (messages.length > 0 && Object.keys(updates).length > 0) {
-                await channel.send(`Hey <@${user.user_id}>, William ya está listo para **${messages.join(' y para ')}**!`).catch(() => {});
+            // PHOTOCARD
+            if (user.photocard_notified === false && now >= (user.last_photocard_claim || 0) + COOLDOWNS.PHOTOCARD) {
+                updates.photocard_notified = true;
+                if (user.pref_photocard !== false) {
+                    messages.push("buscar cartas 🎰");
+                    shouldSend = true;
+                }
+            }
+
+            // DAILY
+            if (user.daily_notified === false && now >= (user.last_daily_claim || 0) + COOLDOWNS.DAILY) {
+                updates.daily_notified = true;
+                if (user.pref_daily !== false) {
+                    messages.push("reclamar daily 📅");
+                    shouldSend = true;
+                }
+            }
+
+            // WEEKLY
+            if (user.weekly_notified === false && now >= (user.last_weekly_claim || 0) + COOLDOWNS.WEEKLY) {
+                updates.weekly_notified = true;
+                if (user.pref_weekly !== false) {
+                    messages.push("reclamar pack semanal 🗓️");
+                    shouldSend = true;
+                }
+            }
+
+            // ALPHA
+            if (user.alpha_notified === false && now >= (user.alpha_reset_time || 0)) {
+                updates.alpha_notified = true;
+                if (user.pref_alpha !== false) {
+                    messages.push("intentar Proyecto Alpha 🐺");
+                    shouldSend = true;
+                }
+            }
+
+            // LICUADORA
+            if (user.licuadora_notified === false && now >= (user.licuadora_reset_time || 0)) {
+                updates.licuadora_notified = true;
+                if (user.licuadora_notified !== false) { // Pequeño typo fix: pref_licuadora
+                     if (user.pref_licuadora !== false) {
+                        messages.push("usar la Licuadora 🌪️");
+                        shouldSend = true;
+                     }
+                }
+            }
+
+            // 3. EJECUTAR ACCIONES
+            if (Object.keys(updates).length > 0) {
+                // Solo enviamos mensaje si hay algo que el usuario QUIERE saber (shouldSend = true)
+                if (shouldSend && messages.length > 0) {
+                    const channel = await client.channels.fetch(user.last_channel_id).catch(() => null);
+                    if (channel) {
+                        await channel.send(`Hey <@${user.user_id}>, William ya está listo para **${messages.join(' y para ')}**!`).catch(() => {});
+                    }
+                }
+                
+                // SIEMPRE actualizamos la DB para que no se quede "trabado" el usuario
                 await supabase.from('users').update(updates).eq('user_id', user.user_id);
             }
         }
@@ -200,14 +233,13 @@ client.on(Events.InteractionCreate, async interaction => {
 
         if (!interaction.isChatInputCommand()) return;
 
-        // 🟢 MEMORIA DE CANAL (Segura y Silenciosa) 🟢
+        // Memoria de Canal (Upsert seguro)
         if (interaction.channelId) {
             const { error } = await supabase.from('users').upsert({
                 user_id: interaction.user.id,
                 last_channel_id: interaction.channelId
             }, { onConflict: 'user_id' });
-            
-            if (error) console.log("Nota: No se pudo actualizar canal (sin impacto en comando).");
+            if (error) console.log("Nota: No se pudo actualizar canal (sin impacto).");
         }
         
         if (!command) return;
