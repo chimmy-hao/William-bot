@@ -6,7 +6,7 @@ require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 
 // ==========================================
-// 🌐 SERVIDOR WEB (Para que Render no se duerma)
+// 🌐 SERVIDOR WEB (Keep-Alive)
 // ==========================================
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -74,7 +74,7 @@ function loadCommands() {
     console.log(`✅ Loaded ${client.commands.size} commands.`);
 }
 
-// Deploy Manual (Necesario para que el autocomplete funcione)
+// Deploy Manual
 async function deployCommands() {
     const commands = [];
     for (const command of client.commands.values()) commands.push(command.data.toJSON());
@@ -100,7 +100,7 @@ async function deployCommands() {
 }
 
 // ==========================================
-// ⏰ NOTIFICACIONES (Versión Completa)
+// ⏰ NOTIFICACIONES (Sistema Completo)
 // ==========================================
 const COOLDOWNS = {
     WORK: 3 * 60 * 1000,
@@ -112,17 +112,20 @@ const COOLDOWNS = {
 setInterval(async () => {
     try {
         const now = Date.now();
-        // Buscamos usuarios que tengan ALGUNA notificación pendiente (false)
+        
+        // --- 🔍 CAMBIO CLAVE AQUÍ ---
+        // Buscamos usuarios con notificaciones pendientes Y ACTIVADAS
         const { data: users, error } = await supabase
             .from('users')
             .select('*')
+            // Esta línea asegura que el comando /notifications funcione:
+            .eq('reminders_enabled', true) 
             .or('work_notified.eq.false,daily_notified.eq.false,weekly_notified.eq.false,photocard_notified.eq.false,alpha_notified.eq.false,licuadora_notified.eq.false')
             .limit(20);
 
         if (error || !users || users.length === 0) return;
 
         for (const user of users) {
-            // Si no hay canal guardado, saltamos (para evitar errores)
             if (!user.last_channel_id) continue;
 
             const channel = await client.channels.fetch(user.last_channel_id).catch(() => null);
@@ -131,61 +134,47 @@ setInterval(async () => {
             let updates = {};
             let messages = [];
 
-            // --- WORK ---
-            if (user.work_notified === false) {
-                if (now >= (user.last_work_claim || 0) + COOLDOWNS.WORK) {
-                    messages.push("trabajar 💼");
-                    updates.work_notified = true;
-                }
+            // WORK
+            if (user.work_notified === false && now >= (user.last_work_claim || 0) + COOLDOWNS.WORK) {
+                messages.push("trabajar 💼");
+                updates.work_notified = true;
             }
-            // --- PHOTOCARD ---
-            if (user.photocard_notified === false) {
-                if (now >= (user.last_photocard_claim || 0) + COOLDOWNS.PHOTOCARD) {
-                    messages.push("buscar cartas 🎰");
-                    updates.photocard_notified = true;
-                }
+            // PHOTOCARD
+            if (user.photocard_notified === false && now >= (user.last_photocard_claim || 0) + COOLDOWNS.PHOTOCARD) {
+                messages.push("buscar cartas 🎰");
+                updates.photocard_notified = true;
             }
-            // --- DAILY ---
-            if (user.daily_notified === false) {
-                if (now >= (user.last_daily_claim || 0) + COOLDOWNS.DAILY) {
-                    messages.push("reclamar daily 📅");
-                    updates.daily_notified = true;
-                }
+            // DAILY
+            if (user.daily_notified === false && now >= (user.last_daily_claim || 0) + COOLDOWNS.DAILY) {
+                messages.push("reclamar daily 📅");
+                updates.daily_notified = true;
             }
-            // --- WEEKLY ---
-            if (user.weekly_notified === false) {
-                if (now >= (user.last_weekly_claim || 0) + COOLDOWNS.WEEKLY) {
-                    messages.push("reclamar pack semanal 🗓️");
-                    updates.weekly_notified = true;
-                }
+            // WEEKLY
+            if (user.weekly_notified === false && now >= (user.last_weekly_claim || 0) + COOLDOWNS.WEEKLY) {
+                messages.push("reclamar pack semanal 🗓️");
+                updates.weekly_notified = true;
             }
-            // --- ALPHA (Usa Reset Time específico) ---
-            if (user.alpha_notified === false) {
-                if (now >= (user.alpha_reset_time || 0)) {
-                    messages.push("intentar Proyecto Alpha 🐺");
-                    updates.alpha_notified = true;
-                }
+            // ALPHA
+            if (user.alpha_notified === false && now >= (user.alpha_reset_time || 0)) {
+                messages.push("intentar Proyecto Alpha 🐺");
+                updates.alpha_notified = true;
             }
-            // --- LICUADORA (Usa Reset Time específico) ---
-            if (user.licuadora_notified === false) {
-                if (now >= (user.licuadora_reset_time || 0)) {
-                    messages.push("usar la Licuadora 🌪️");
-                    updates.licuadora_notified = true;
-                }
+            // LICUADORA
+            if (user.licuadora_notified === false && now >= (user.licuadora_reset_time || 0)) {
+                messages.push("usar la Licuadora 🌪️");
+                updates.licuadora_notified = true;
             }
 
-            // ENVIAR MENSAJE SI HAY NOVEDADES
+            // ENVIAR
             if (messages.length > 0 && Object.keys(updates).length > 0) {
                 await channel.send(`Hey <@${user.user_id}>, William ya está listo para **${messages.join(' y para ')}**!`).catch(() => {});
-                
-                // Marcar como notificado en la DB
                 await supabase.from('users').update(updates).eq('user_id', user.user_id);
             }
         }
     } catch (e) {
         console.error("Error notificaciones:", e);
     }
-}, 60000); // Revisa cada 60 segundos
+}, 60000); 
 
 
 // Evento Ready
@@ -193,7 +182,6 @@ client.once(Events.ClientReady, async readyClient => {
     console.log(`🤖 Logged in as ${readyClient.user.tag}`);
     client.user.setPresence({ activities: [{ name: 'ทัก (FIRST SIGHT) - LYKN', type: 2 }], status: 'online' });
     
-    // Deploy al iniciar
     await deployCommands(); 
     cleanupTempDirectory();
 });
@@ -203,7 +191,6 @@ client.on(Events.InteractionCreate, async interaction => {
     try {
         const command = client.commands.get(interaction.commandName);
 
-        // Manejo de Autocomplete
         if (interaction.isAutocomplete()) {
             if (command && command.autocomplete) {
                 await command.autocomplete(interaction, supabase);
@@ -213,17 +200,14 @@ client.on(Events.InteractionCreate, async interaction => {
 
         if (!interaction.isChatInputCommand()) return;
 
-        // 🟢 RESTAURAMOS LA MEMORIA DEL CANAL (DE FORMA SEGURA) 🟢
-        // Esto permite que el bot sepa dónde pinguearte si te cambias de canal
+        // 🟢 MEMORIA DE CANAL (Segura y Silenciosa) 🟢
         if (interaction.channelId) {
-            // Usamos destructuración para manejar el error sin crash
             const { error } = await supabase.from('users').upsert({
                 user_id: interaction.user.id,
                 last_channel_id: interaction.channelId
             }, { onConflict: 'user_id' });
             
-            // Si falla, solo lo logueamos en consola, NO rompemos el comando
-            if (error) console.log("Nota: No se pudo guardar el canal (Supabase), pero el comando sigue.");
+            if (error) console.log("Nota: No se pudo actualizar canal (sin impacto en comando).");
         }
         
         if (!command) return;
