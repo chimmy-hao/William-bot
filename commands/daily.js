@@ -30,7 +30,6 @@ const williamDailyGifs = [
     'https://media.tenor.com/aOYEYRzEXdAAAAAM/thamepo-thamepo-heart-that-skips-a-beat.gif'
 ];
 
-// Función ID único
 const generateUniqueCardCode = (baseCode) => {
   const randomSuffix = Math.floor(1000 + Math.random() * 9000);
   return `${baseCode}.${randomSuffix}`;
@@ -45,10 +44,7 @@ module.exports = {
     const userId = interaction.user.id;
     const now = Date.now();
 
-    // ---------------------------------------------------------
-    // 1. VERIFICACIÓN DE COOLDOWN (BASE DE DATOS)
-    // ---------------------------------------------------------
-    
+    // 1. COOLDOWN
     let { data: userCheck } = await supabase
         .from('users')
         .select('last_daily_claim')
@@ -67,14 +63,10 @@ module.exports = {
       });
     }
 
-    // ---------------------------------------------------------
-    // 2. LÓGICA DE PREMIO
-    // ---------------------------------------------------------
-
     try {
       await interaction.deferReply();
 
-      // Buscar carta rareza 2
+      // 2. BUSCAR PREMIO
       const { data: rareCards, error: cardError } = await supabase
         .from('base_cards')
         .select('*')
@@ -87,7 +79,7 @@ module.exports = {
       const randomCard = rareCards[Math.floor(Math.random() * rareCards.length)];
       const uniqueCode = generateUniqueCardCode(randomCard.card_code);
 
-      // Obtener datos del usuario
+      // 3. OBTENER USUARIO
       let { data: userData } = await supabase
         .from('users')
         .select('balance')
@@ -105,21 +97,16 @@ module.exports = {
 
       const newBalance = (userData.balance || 0) + REWARD_AMOUNT;
 
-      // ---------------------------------------------------------
-      // 3. ACTUALIZAR DB + NOTIFICACIÓN + HISTORIAL
-      // ---------------------------------------------------------
-
-      // A) Actualizar saldo, tiempo y activar aviso
+      // 4. ACTUALIZAR DB
       await supabase
         .from('users')
         .update({ 
             balance: newBalance,
             last_daily_claim: now,
-            daily_notified: false // <--- 🔔 Activa el aviso futuro
+            daily_notified: false
         })
         .eq('user_id', userId);
 
-      // B) Entregar carta
       await supabase.from('user_cards').insert({
         user_id: userId,
         card_id: randomCard.id,
@@ -127,7 +114,6 @@ module.exports = {
         unique_card_id: uniqueCode
       });
 
-      // C) Guardar en Historial
       await supabase.from('history_logs').insert({
           user_id: userId,
           action_type: 'daily',
@@ -135,10 +121,7 @@ module.exports = {
           details: `Reclamó daily. Carta extra: ${randomCard.name}`
       });
 
-      // ---------------------------------------------------------
-      // 4. RESPUESTA VISUAL (GIF ALEATORIO CON RESPALDO)
-      // ---------------------------------------------------------
-
+      // 5. RESPUESTA VISUAL
       const embed = new EmbedBuilder()
           .setColor('#e84393')
           .setTitle('📅 Recompensa Diaria')
@@ -150,12 +133,16 @@ module.exports = {
 
       const filesToSend = [];
 
-      // Seleccionar GIF de la lista (Prioridad) o usar local (Respaldo)
       if (williamDailyGifs && williamDailyGifs.length > 0) {
-          const randomGif = williamDailyGifs[Math.floor(Math.random() * williamDailyGifs.length)];
+          let randomGif = williamDailyGifs[Math.floor(Math.random() * williamDailyGifs.length)];
+          
+          // 🔧 PARCHE: Webp a Gif
+          if (randomGif.includes('.webp')) {
+              randomGif = randomGif.replace('.webp', '.gif');
+          }
+          
           embed.setImage(randomGif);
       } else {
-          // Fallback: Archivo Local
           const file = new AttachmentBuilder('./daily.gif');
           embed.setImage('attachment://daily.gif');
           filesToSend.push(file);
@@ -165,7 +152,6 @@ module.exports = {
 
     } catch (error) {
       console.error('Error en daily:', error);
-      // Evitamos dejar el comando colgado
       if (!interaction.deferred && !interaction.replied) {
           await interaction.reply({ content: '❌ Error interno al reclamar.', ephemeral: true });
       } else {
