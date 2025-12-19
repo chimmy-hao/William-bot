@@ -6,11 +6,29 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY
 );
 
+const moneyEmoji = '<:berrycoin:1411737957081288724>';
+
 // --- CONFIGURACIÓN ---
 const COOLDOWN_TIME = 12 * 60 * 60 * 1000; // 12 Horas
 const REWARD_AMOUNT = 2000;
 const REWARD_RARITY = 2; 
-const moneyEmoji = '<:berrycoin:1411737957081288724>';
+
+// --- LISTA DE GIFS ---
+const williamDailyGifs = [
+    'https://media.tenor.com/ggNFlSnG8vwAAAA1/williamest-yeolykn-williamest-tiktok.webp',
+    'https://media.tenor.com/PM1ITcPfrbsAAAAM/lyknzip-williamest.gif',
+    'https://media.tenor.com/FEFJhjlqVmgAAAAM/william-jkp-est-supha.gif',
+    'https://media.tenor.com/pOaLExWXPbQAAAA1/thamepo-thamepo-gmmtv.gif',
+    'https://media.tenor.com/QZLaSri-3vEAAAAM/williamest.gif',
+    'https://media.tenor.com/v1Hx0S5x0E0AAAAM/lyknzip-williamest.gif',
+    'https://media.tenor.com/QTdaowTO83YAAAAM/lyknzip-williamest.gif',
+    'https://media.tenor.com/A47HPlAobh4AAAA1/williamest-willest.gif',
+    'https://media.tenor.com/1d5MfbVU6GwAAAA1/williamest-william.gif',
+    'https://media.tenor.com/y8_CKT4lbyIAAAAM/you-maniac-williamest.gif',
+    'https://media.tenor.com/jKjMaqzJJ-UAAAAM/thamepo-thamepo-kiss.gif',
+    'https://media.tenor.com/9801rZ2P1YYAAAAM/thamepo-thamepo-forehead-kiss.gif',
+    'https://media.tenor.com/aOYEYRzEXdAAAAAM/thamepo-thamepo-heart-that-skips-a-beat.gif'
+];
 
 // Función ID único
 const generateUniqueCardCode = (baseCode) => {
@@ -31,18 +49,15 @@ module.exports = {
     // 1. VERIFICACIÓN DE COOLDOWN (BASE DE DATOS)
     // ---------------------------------------------------------
     
-    // Leemos si el usuario tiene una fecha guardada
     let { data: userCheck } = await supabase
         .from('users')
         .select('last_daily_claim')
         .eq('user_id', userId)
         .single();
 
-    // Si no existe el usuario, asumimos 0 para que pueda reclamar y registrarse abajo
     const lastUsed = userCheck?.last_daily_claim || 0; 
     const remaining = COOLDOWN_TIME - (now - lastUsed);
 
-    // Si falta tiempo, paramos aquí
     if (remaining > 0) {
       const hours = Math.floor(remaining / (1000 * 60 * 60));
       const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
@@ -53,7 +68,7 @@ module.exports = {
     }
 
     // ---------------------------------------------------------
-    // 2. LÓGICA DE PREMIO (INTACTA)
+    // 2. LÓGICA DE PREMIO
     // ---------------------------------------------------------
 
     try {
@@ -72,7 +87,7 @@ module.exports = {
       const randomCard = rareCards[Math.floor(Math.random() * rareCards.length)];
       const uniqueCode = generateUniqueCardCode(randomCard.card_code);
 
-      // Obtener datos del usuario para el Balance
+      // Obtener datos del usuario
       let { data: userData } = await supabase
         .from('users')
         .select('balance')
@@ -90,16 +105,21 @@ module.exports = {
 
       const newBalance = (userData.balance || 0) + REWARD_AMOUNT;
 
-      // ACTUALIZAR BALANCE Y EL TIEMPO (Aquí guardamos el cooldown)
+      // ---------------------------------------------------------
+      // 3. ACTUALIZAR DB + NOTIFICACIÓN + HISTORIAL
+      // ---------------------------------------------------------
+
+      // A) Actualizar saldo, tiempo y activar aviso
       await supabase
         .from('users')
         .update({ 
             balance: newBalance,
-            last_daily_claim: now // <--- ESTO GUARDA EL TIEMPO EN LA DB
+            last_daily_claim: now,
+            daily_notified: false // <--- 🔔 Activa el aviso futuro
         })
         .eq('user_id', userId);
 
-      // Entregar carta
+      // B) Entregar carta
       await supabase.from('user_cards').insert({
         user_id: userId,
         card_id: randomCard.id,
@@ -107,28 +127,50 @@ module.exports = {
         unique_card_id: uniqueCode
       });
 
-      // Enviar GIF y Embed
-      try {
-        const file = new AttachmentBuilder('./daily.gif');
-        
-        const embed = new EmbedBuilder()
-            .setColor('#e84393')
-            .setTitle('📅 Recompensa Diaria')
-            .setDescription(
+      // C) Guardar en Historial
+      await supabase.from('history_logs').insert({
+          user_id: userId,
+          action_type: 'daily',
+          amount: REWARD_AMOUNT,
+          details: `Reclamó daily. Carta extra: ${randomCard.name}`
+      });
+
+      // ---------------------------------------------------------
+      // 4. RESPUESTA VISUAL (GIF ALEATORIO CON RESPALDO)
+      // ---------------------------------------------------------
+
+      const embed = new EmbedBuilder()
+          .setColor('#e84393')
+          .setTitle('📅 Recompensa Diaria')
+          .setDescription(
             `Por ayudarlo a planear su cita con Est, William te otorga **${REWARD_AMOUNT}** ${moneyEmoji} y la carta \`${uniqueCode}\`.` +
             `\n\n🃏 **Carta recibida:** ${randomCard.name}`
-            )
-            .setImage('attachment://daily.gif')
-            .setTimestamp();
+          )
+          .setTimestamp();
 
-        await interaction.editReply({ embeds: [embed], files: [file] });
-      } catch (e) {
-        await interaction.editReply(`✅ **¡Daily reclamado!** (No pude cargar el GIF, pero recibiste tus premios).\nGanaste: ${randomCard.name} y ${REWARD_AMOUNT} monedas.`);
+      const filesToSend = [];
+
+      // Seleccionar GIF de la lista (Prioridad) o usar local (Respaldo)
+      if (williamDailyGifs && williamDailyGifs.length > 0) {
+          const randomGif = williamDailyGifs[Math.floor(Math.random() * williamDailyGifs.length)];
+          embed.setImage(randomGif);
+      } else {
+          // Fallback: Archivo Local
+          const file = new AttachmentBuilder('./daily.gif');
+          embed.setImage('attachment://daily.gif');
+          filesToSend.push(file);
       }
+
+      await interaction.editReply({ embeds: [embed], files: filesToSend });
 
     } catch (error) {
       console.error('Error en daily:', error);
-      await interaction.editReply('❌ Hubo un error al reclamar tu recompensa.');
+      // Evitamos dejar el comando colgado
+      if (!interaction.deferred && !interaction.replied) {
+          await interaction.reply({ content: '❌ Error interno al reclamar.', ephemeral: true });
+      } else {
+          await interaction.editReply('❌ Hubo un error al reclamar tu recompensa.');
+      }
     }
   }
 };
