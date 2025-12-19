@@ -3,10 +3,24 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('notifications')
-    .setDescription('🔕 Activa o desactiva los recordatorios automáticos de William.')
+    .setDescription('🔕 Configura qué recordatorios quieres recibir.')
+    .addStringOption(option =>
+      option.setName('tipo')
+        .setDescription('Elige qué notificación configurar')
+        .setRequired(true)
+        .addChoices(
+          { name: '💼 Work', value: 'pref_work' },
+          { name: '📅 Daily', value: 'pref_daily' },
+          { name: '🗓️ Weekly', value: 'pref_weekly' },
+          { name: '🎰 Photocard', value: 'pref_photocard' },
+          { name: '🐺 Alpha', value: 'pref_alpha' },
+          { name: '🌪️ Licuadora', value: 'pref_licuadora' },
+          { name: '🎚️ TODO (Activar/Desactivar todo)', value: 'all' }
+        )
+    )
     .addStringOption(option =>
       option.setName('estado')
-        .setDescription('¿Quieres recibir notificaciones?')
+        .setDescription('¿Encender o Apagar?')
         .setRequired(true)
         .addChoices(
           { name: '✅ Encender (ON)', value: 'true' },
@@ -16,33 +30,58 @@ module.exports = {
 
   async execute(interaction, supabase) {
     const userId = interaction.user.id;
-    const choice = interaction.options.getString('estado') === 'true';
+    const type = interaction.options.getString('tipo');
+    const newState = interaction.options.getString('estado') === 'true';
 
     try {
       await interaction.deferReply({ ephemeral: true });
 
-      // Actualizamos la preferencia del usuario
+      let updates = {};
+      let description = '';
+
+      if (type === 'all') {
+        // Si elige TODO, actualizamos todas las columnas
+        updates = {
+            pref_work: newState,
+            pref_daily: newState,
+            pref_weekly: newState,
+            pref_photocard: newState,
+            pref_alpha: newState,
+            pref_licuadora: newState
+        };
+        description = newState 
+            ? '✅ Has activado **TODAS** las notificaciones.' 
+            : '🔕 Has desactivado **TODAS** las notificaciones.';
+      } else {
+        // Si elige una específica
+        updates[type] = newState;
+        const nameMap = {
+            pref_work: 'Work', pref_daily: 'Daily', pref_weekly: 'Weekly',
+            pref_photocard: 'Photocard', pref_alpha: 'Alpha', pref_licuadora: 'Licuadora'
+        };
+        description = newState 
+            ? `✅ Notificaciones de **${nameMap[type]}** activadas.` 
+            : `🔕 Notificaciones de **${nameMap[type]}** desactivadas.`;
+      }
+
+      // Guardar en Base de Datos
       const { error } = await supabase
         .from('users')
-        .update({ reminders_enabled: choice })
+        .update(updates)
         .eq('user_id', userId);
 
       if (error) throw error;
 
-      // Mensaje de confirmación
       const embed = new EmbedBuilder()
-        .setColor(choice ? '#2ecc71' : '#e74c3c')
-        .setTitle(choice ? '🔔 Notificaciones Activadas' : '🔕 Notificaciones Desactivadas')
-        .setDescription(choice 
-          ? 'William te avisará cuando tus cooldowns terminen.\n¡A trabajar!' 
-          : 'Entendido. William no te molestará con recordatorios automáticos.'
-        );
+        .setColor(newState ? '#2ecc71' : '#e74c3c')
+        .setTitle('⚙️ Configuración Actualizada')
+        .setDescription(description);
 
       await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
-      console.error('Error en /notifications:', error);
-      await interaction.editReply({ content: '❌ Hubo un error al guardar tu preferencia.', ephemeral: true });
+      console.error('Error notifications:', error);
+      await interaction.editReply({ content: '❌ Error al guardar tu configuración.', ephemeral: true });
     }
   }
 };
