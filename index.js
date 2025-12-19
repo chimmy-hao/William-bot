@@ -132,12 +132,10 @@ setInterval(async () => {
         if (error || !users || users.length === 0) return;
 
         for (const user of users) {
-            // Si no sabemos en qué canal hablarle, saltamos al siguiente
             if (!user.last_channel_id) continue;
 
-            // Intentamos obtener el canal donde usó el comando por última vez
             const channel = await client.channels.fetch(user.last_channel_id).catch(() => null);
-            if (!channel) continue; // Si el canal fue borrado o no hay acceso
+            if (!channel) continue;
 
             let updates = {};
             let messages = [];
@@ -216,14 +214,13 @@ client.once(Events.ClientReady, async readyClient => {
         status: 'online',
     });
 
-    // Deploy commands activado para actualizar el autocompletado
     await deployCommands(); 
     console.log('✅ Commands deployed.');
 
     cleanupTempDirectory();
 });
 
-// Interaction handler with autocomplete support
+// Interaction handler
 client.on(Events.InteractionCreate, async interaction => {
     try {
         const command = client.commands.get(interaction.commandName);
@@ -239,10 +236,12 @@ client.on(Events.InteractionCreate, async interaction => {
         // 🟢 GUARDA EL CANAL ACTUAL PARA FUTURAS NOTIFICACIONES 🟢
         // Esto permite que el bot sepa dónde pinguearte
         if (interaction.channelId) {
-            await supabase.from('users').upsert({
+            const { error } = await supabase.from('users').upsert({
                 user_id: interaction.user.id,
                 last_channel_id: interaction.channelId
-            }, { onConflict: 'user_id' }).catch(err => console.error("Error guardando canal:", err));
+            }, { onConflict: 'user_id' });
+            
+            if (error) console.error("Error guardando canal:", error);
         }
 
         if (!command) return;
