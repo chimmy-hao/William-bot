@@ -96,7 +96,7 @@ module.exports = {
         .update({ 
             balance: newBalance,
             last_work_claim: now,
-            work_notified: false // <--- 🔔 Activa aviso futuro
+            work_notified: false 
         })
         .eq('user_id', userId);
 
@@ -110,7 +110,7 @@ module.exports = {
           details: `Trabajó como ${job} en ${location}`
       });
 
-      // 7. SELECCIÓN DE GIF CON RESPALDO (FALLBACK)
+      // 7. SELECCIÓN DE GIF CON ARREGLO PARA WEBP
       let embed = new EmbedBuilder()
         .setColor('#f1c40f')
         .setTitle('💼 Work Result')
@@ -124,13 +124,17 @@ module.exports = {
 
       const filesToSend = [];
 
-      // LÓGICA: Si hay GIFs en la lista, usamos uno random.
-      // Si la lista está vacía, usamos el archivo local './work.gif' como respaldo.
       if (williamGifs && williamGifs.length > 0) {
-          const randomGif = williamGifs[Math.floor(Math.random() * williamGifs.length)];
+          let randomGif = williamGifs[Math.floor(Math.random() * williamGifs.length)];
+          
+          // 🔧 PARCHE: Si es .webp, lo convertimos a .gif para que no se congele
+          if (randomGif.includes('.webp')) {
+              randomGif = randomGif.replace('.webp', '.gif');
+          }
+          
           embed.setImage(randomGif);
       } else {
-          // Fallback: Archivo Local
+          // Fallback
           const attachment = new AttachmentBuilder('./work.gif');
           embed.setImage('attachment://work.gif');
           filesToSend.push(attachment);
@@ -140,7 +144,6 @@ module.exports = {
 
     } catch (err) {
       console.error('Error en /work:', err);
-      // Evitamos dejar al usuario esperando si hubo error
       if (!interaction.deferred && !interaction.replied) {
           await interaction.reply({ content: '❌ Ocurrió un error inesperado.', ephemeral: true });
       } else {
