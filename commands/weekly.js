@@ -11,6 +11,14 @@ const REWARDS = [
     { code: 'kiwi',   count: 1, name: 'Kiwi Pack',   emoji: '<:pack_kiwi:1413292487455408201>' }
 ];
 
+// --- LISTA DE VARIACIÓN (Para dar frescura) ---
+const weeklyGifs = [
+    'https://media.tenor.com/sEWvs4aajowAAAAM/lykn-williamjkp.gif',
+    'https://media.tenor.com/SkKGg1qaV7MAAAAM/lykn-williamjkp.gif',
+    'https://media.tenor.com/_dCnuDEYc7MAAAAM/lykn-william-lykn.gif',
+    'https://media.tenor.com/fbX5_SKWKO4AAAAM/lyknzip-lykn.gif'
+];
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('weekly')
@@ -23,10 +31,9 @@ module.exports = {
     try {
       await interaction.deferReply();
 
-      // 1. VERIFICAR COOLDOWN EN DB
+      // 1. VERIFICAR COOLDOWN
       let { data: user } = await supabase.from('users').select('last_weekly_claim').eq('user_id', userId).single();
       
-      // Si el usuario no existe, asumimos que puede reclamar (se creará luego)
       const lastUsed = user?.last_weekly_claim || 0;
       const remaining = COOLDOWN_TIME - (now - lastUsed);
 
@@ -37,7 +44,7 @@ module.exports = {
         return interaction.editReply(`⏳ Ya ayudaste a William esta semana. Vuelve en **${days}d ${hours}h ${minutes}m**.`);
       }
 
-      // 2. LOGICA DE PREMIOS (PACKS)
+      // 2. ENTREGA DE PREMIOS (PACKS)
       const rewardCodes = REWARDS.map(r => r.code);
       const { data: currentPacks } = await supabase
         .from('user_packs')
@@ -54,41 +61,71 @@ module.exports = {
         };
       });
 
-      // Guardar Packs
+      // Upsert Packs
       await supabase.from('user_packs').upsert(updates, { onConflict: 'user_id, pack_code' });
 
-      // 3. ACTUALIZAR TIEMPO EN DB
+      // 3. ACTUALIZAR TIEMPO + NOTIFICACIÓN + HISTORIAL
       await supabase.from('users').upsert({
         user_id: userId,
         username: interaction.user.username,
-        last_weekly_claim: now
+        last_weekly_claim: now,
+        weekly_notified: false // <--- 🔔 Recordatorio activado
       }, { onConflict: 'user_id' });
 
-      // 4. RESPUESTA ESTÉTICA
-      // Generamos la lista bonita
+      // Historial
+      await supabase.from('history_logs').insert({
+          user_id: userId,
+          action_type: 'weekly',
+          details: `Reclamó pack semanal: Banana x3, Grape x2, Kiwi x1`
+      });
+
+      // 4. RESPUESTA VISUAL
       const packsList = REWARDS.map(r => 
         `**x${r.count}** ${r.name} ${r.emoji}`
       ).join('\n');
 
-      // Preparamos el GIF
-      const file = new AttachmentBuilder('./weekly.gif');
-
       const embed = new EmbedBuilder()
-        .setColor('#FFD700') // Dorado
+        .setColor('#FFD700')
         .setTitle('📅 Recompensa Semanal')
         .setDescription(
             `**William** te otorga estos packs por ayudarlo a organizar el ensayo para el *comeback* de **LYKN**. ¡Gracias por tu esfuerzo!\n\n` +
             `🎁 **Obtuviste:**\n${packsList}`
         )
-        .setImage('attachment://weekly.gif')
         .setFooter({ text: '¡Vuelve en 7 días para más suministros!' })
         .setTimestamp();
 
-      await interaction.editReply({ embeds: [embed], files: [file] });
+      // --- LÓGICA DE IMAGEN (MAIN vs VARIACIÓN) ---
+      const filesToSend = [];
+      
+      // Tiramos una moneda: 50% (0.5) de probabilidad de usar el GIF LOCAL (Main)
+      // O si la lista está vacía, forzamos el local.
+      const useMainGif = Math.random() < 0.5 || weeklyGifs.length === 0;
+
+      if (useMainGif) {
+          // CASO MAIN: Usamos el archivo local weekly.gif
+          const file = new AttachmentBuilder('./weekly.gif');
+          embed.setImage('attachment://weekly.gif');
+          filesToSend.push(file);
+      } else {
+          // CASO VARIACIÓN: Usamos uno de la lista
+          let randomGif = weeklyGifs[Math.floor(Math.random() * weeklyGifs.length)];
+          
+          // Arreglo Webp -> Gif
+          if (randomGif.includes('.webp')) {
+              randomGif = randomGif.replace('.webp', '.gif');
+          }
+          embed.setImage(randomGif);
+      }
+
+      await interaction.editReply({ embeds: [embed], files: filesToSend });
 
     } catch (error) {
       console.error('Error weekly:', error);
-      await interaction.editReply('❌ Ocurrió un error al entregar tus recompensas.');
+      if (!interaction.deferred && !interaction.replied) {
+          await interaction.reply({ content: '❌ Error interno.', ephemeral: true });
+      } else {
+          await interaction.editReply('❌ Ocurrió un error al entregar tus recompensas.');
+      }
     }
   }
 };
