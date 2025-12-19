@@ -109,19 +109,21 @@ module.exports = {
       const uniqueId = generateUniqueCardCode(randomCard.card_code);
 
       // ---------------------------------------------------------
-      // 3. ACTUALIZAR COOLDOWN Y GUARDAR CARTA
+      // 3. ACTUALIZAR DB + NOTIFICACIÓN + HISTORIAL
       // ---------------------------------------------------------
 
-      // Actualizamos usuario y su tiempo (last_photocard_claim)
+      // Actualizamos usuario, tiempo Y ACTIVAMOS NOTIFICACIÓN
       await supabase.from('users').upsert(
         { 
             user_id: userId, 
             username: interaction.user.username,
-            last_photocard_claim: now // <--- SE GUARDA EL TIEMPO AQUÍ
+            last_photocard_claim: now,
+            photocard_notified: false // <--- 🔔 Recordatorio activado
         },
         { onConflict: 'user_id' }
       );
 
+      // Guardamos la carta
       const { error: insertError } = await supabase.from('user_cards').insert({
         user_id: userId,
         card_id: randomCard.id,
@@ -130,6 +132,14 @@ module.exports = {
       });
 
       if (insertError) throw insertError;
+
+      // 📜 GUARDAR EN HISTORIAL
+      const cleanNameLog = randomCard.name.split(' — ')[0].trim();
+      await supabase.from('history_logs').insert({
+          user_id: userId,
+          action_type: 'drop',
+          details: `Obtuvo ${cleanNameLog} (${uniqueId}) de Rareza ${level}`
+      });
 
       // ---------------------------------------------------------
       // 4. PROCESAMIENTO DE IMAGEN (CANVAS)
@@ -166,7 +176,7 @@ module.exports = {
       }
 
       // ---------------------------------------------------------
-      // 5. EMBED FINAL (CON EL NUEVO TEXTO)
+      // 5. EMBED FINAL
       // ---------------------------------------------------------
       const rConfig = rarityConfig[level];
       const cleanName = randomCard.name.split(' — ')[0].trim();
