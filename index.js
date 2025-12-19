@@ -124,7 +124,7 @@ client.once(Events.ClientReady, async readyClient => {
 
     // 👇 ¡ESTO ES LO IMPORTANTE! 👇
     // Comentamos esta línea para que NO registre comandos cada vez que se reinicia.
-    // await deployCommands(); 
+    await deployCommands(); 
     console.log('⏩ Skipped command deployment for faster startup.');
 
     cleanupTempDirectory();
@@ -182,3 +182,4 @@ client.login(process.env.DISCORD_TOKEN).catch(error => {
     console.error('❌ Failed to login:', error); 
     process.exit(1); 
 });
+
