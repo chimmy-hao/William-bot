@@ -67,12 +67,10 @@ function loadCommands() {
     for (const file of commandFiles) {
         const filePath = path.join(commandsPath, file);
         try {
-            // Limpiamos la cache para permitir recargas en caliente si fuera necesario
             delete require.cache[require.resolve(filePath)];
             const command = require(filePath);
             if ('data' in command && 'execute' in command) {
                 client.commands.set(command.data.name, command);
-                // console.log(`✅ Loaded: ${command.data.name}`); // Comentado para reducir spam en logs
             } else {
                 console.log(`⚠️ Command at ${filePath} is missing "data" or "execute".`);
             }
@@ -109,6 +107,102 @@ async function deployCommands() {
     }
 }
 
+// ==========================================
+// ⏰ SISTEMA DE NOTIFICACIONES (AUTO-PING)
+// ==========================================
+const COOLDOWNS = {
+    WORK: 3 * 60 * 1000,
+    PHOTOCARD: 5 * 60 * 1000,
+    DAILY: 12 * 60 * 60 * 1000,
+    WEEKLY: 7 * 24 * 60 * 60 * 1000
+};
+
+// Se ejecuta cada 60 segundos
+setInterval(async () => {
+    try {
+        const now = Date.now();
+        
+        // Buscamos usuarios con notificaciones pendientes
+        const { data: users, error } = await supabase
+            .from('users')
+            .select('*')
+            .or('work_notified.eq.false,daily_notified.eq.false,weekly_notified.eq.false,photocard_notified.eq.false,alpha_notified.eq.false,licuadora_notified.eq.false')
+            .limit(20);
+
+        if (error || !users || users.length === 0) return;
+
+        for (const user of users) {
+            // Si no sabemos en qué canal hablarle, saltamos al siguiente
+            if (!user.last_channel_id) continue;
+
+            // Intentamos obtener el canal donde usó el comando por última vez
+            const channel = await client.channels.fetch(user.last_channel_id).catch(() => null);
+            if (!channel) continue; // Si el canal fue borrado o no hay acceso
+
+            let updates = {};
+            let messages = [];
+
+            // --- WORK ---
+            if (user.work_notified === false) {
+                const readyAt = (user.last_work_claim || 0) + COOLDOWNS.WORK;
+                if (now >= readyAt) {
+                    messages.push("acompañarte al trabajo 💼");
+                    updates.work_notified = true;
+                }
+            }
+            // --- PHOTOCARD ---
+            if (user.photocard_notified === false) {
+                const readyAt = (user.last_photocard_claim || 0) + COOLDOWNS.PHOTOCARD;
+                if (now >= readyAt) {
+                    messages.push("buscar nuevas cartas 🎰");
+                    updates.photocard_notified = true;
+                }
+            }
+            // --- DAILY ---
+            if (user.daily_notified === false) {
+                const readyAt = (user.last_daily_claim || 0) + COOLDOWNS.DAILY;
+                if (now >= readyAt) {
+                    messages.push("darte tu recompensa diaria 📅");
+                    updates.daily_notified = true;
+                }
+            }
+            // --- WEEKLY ---
+            if (user.weekly_notified === false) {
+                const readyAt = (user.last_weekly_claim || 0) + COOLDOWNS.WEEKLY;
+                if (now >= readyAt) {
+                    messages.push("entregarte tus provisiones semanales 🗓️");
+                    updates.weekly_notified = true;
+                }
+            }
+            // --- ALPHA (Usa Reset Time) ---
+            if (user.alpha_notified === false) {
+                if (now >= (user.alpha_reset_time || 0)) {
+                    messages.push("realizar el Proyecto Alpha 🐺");
+                    updates.alpha_notified = true;
+                }
+            }
+            // --- LICUADORA (Usa Reset Time) ---
+            if (user.licuadora_notified === false) {
+                if (now >= (user.licuadora_reset_time || 0)) {
+                    messages.push("encender la licuadora 🌪️");
+                    updates.licuadora_notified = true;
+                }
+            }
+
+            // ENVIAR MENSAJE
+            if (messages.length > 0 && Object.keys(updates).length > 0) {
+                const text = `Hey <@${user.user_id}>, William ya está listo para **${messages.join(' y para ')}**!`;
+                
+                await channel.send(text).catch(e => console.error("No pude enviar mensaje:", e));
+                await supabase.from('users').update(updates).eq('user_id', user.user_id);
+            }
+        }
+    } catch (err) {
+        console.error("Error en loop notificaciones:", err);
+    }
+}, 60000);
+
+
 // Bot ready event
 client.once(Events.ClientReady, async readyClient => {
     console.log(`🤖 Bot is ready! Logged in as ${readyClient.user.tag}`);
@@ -122,10 +216,9 @@ client.once(Events.ClientReady, async readyClient => {
         status: 'online',
     });
 
-    // 👇 ¡ESTO ES LO IMPORTANTE! 👇
-    // Comentamos esta línea para que NO registre comandos cada vez que se reinicia.
+    // Deploy commands activado para actualizar el autocompletado
     await deployCommands(); 
-    console.log('⏩ Skipped command deployment for faster startup.');
+    console.log('✅ Commands deployed.');
 
     cleanupTempDirectory();
 });
@@ -142,12 +235,21 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         if (!interaction.isChatInputCommand()) return;
+
+        // 🟢 GUARDA EL CANAL ACTUAL PARA FUTURAS NOTIFICACIONES 🟢
+        // Esto permite que el bot sepa dónde pinguearte
+        if (interaction.channelId) {
+            await supabase.from('users').upsert({
+                user_id: interaction.user.id,
+                last_channel_id: interaction.channelId
+            }, { onConflict: 'user_id' }).catch(err => console.error("Error guardando canal:", err));
+        }
+
         if (!command) return;
 
         await command.execute(interaction, supabase);
     } catch (error) {
         console.error(`❌ Error handling interaction:`, error);
-        // Evitar crash si ya se respondió
         if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({ content: '❌ Error executing command!', ephemeral: true }).catch(() => {});
         } else {
@@ -156,13 +258,12 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 });
 
-// Global error handlers (Evitan que el bot se apague por errores menores)
+// Global error handlers
 process.on('unhandledRejection', (reason, promise) => {
-    // console.error('🚨 Unhandled Rejection:', reason); // Descomentar si necesitas depurar
+    // console.error('🚨 Unhandled Rejection:', reason); 
 });
 process.on('uncaughtException', error => {
     console.error('🚨 Uncaught Exception:', error);
-    // NO hacemos process.exit(1) para intentar mantenerlo vivo
 });
 client.on('error', error => console.error('🚨 Discord Client error:', error));
 
@@ -182,4 +283,3 @@ client.login(process.env.DISCORD_TOKEN).catch(error => {
     console.error('❌ Failed to login:', error); 
     process.exit(1); 
 });
-
