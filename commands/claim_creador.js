@@ -9,26 +9,26 @@ const ALLOWED_ROLES = ['1413313501694263357', '1412852141197885464'];
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('claim_creador')
-    .setDescription('ADMIN: Reclama la autoría usando autocompletado para evitar errores.')
+    .setDescription('ADMIN: Reclama la autoría usando autocompletado.')
     .addStringOption(option => 
       option.setName('code')
-        .setDescription('Código Base (ej: WMO). Actualizará WMO1, WMO2, etc.')
-        .setAutocomplete(true) // <--- Activa el autocompletado
+        .setDescription('Código Base (ej: WMO).')
+        .setAutocomplete(true)
     )
     .addStringOption(option => 
       option.setName('grupo')
-        .setDescription('Nombre del grupo (Selecciona de la lista)')
-        .setAutocomplete(true) // <--- Activa el autocompletado
+        .setDescription('Nombre del grupo')
+        .setAutocomplete(true)
     )
     .addStringOption(option => 
       option.setName('era')
-        .setDescription('Nombre de la era (Selecciona de la lista)')
-        .setAutocomplete(true) // <--- Activa el autocompletado
+        .setDescription('Nombre de la era')
+        .setAutocomplete(true)
     )
     .addStringOption(option => 
       option.setName('artista')
-        .setDescription('Nombre del idol (Opcional, filtra dentro de la Era)')
-        .setAutocomplete(true) // <--- Activa el autocompletado
+        .setDescription('Nombre del idol (Busca coincidencia parcial)')
+        .setAutocomplete(true)
     ),
 
   // --- LÓGICA DE AUTOCOMPLETADO ---
@@ -37,52 +37,43 @@ module.exports = {
     const userInput = focusedOption.value;
 
     try {
-      let query;
       let column;
-
-      // Configuramos qué buscar según qué campo esté escribiendo el usuario
+      // Mapeamos la opción al nombre real de la columna en Supabase
       if (focusedOption.name === 'grupo') column = 'group_name';
-      if (focusedOption.name === 'era') column = 'era';
-      if (focusedOption.name === 'artista') column = 'name'; // La columna name suele ser "Idol - Group"
-      if (focusedOption.name === 'code') column = 'card_code';
+      else if (focusedOption.name === 'era') column = 'era';
+      else if (focusedOption.name === 'artista') column = 'name';
+      else if (focusedOption.name === 'code') column = 'card_code';
+      else return interaction.respond([]);
 
-      // Hacemos la consulta a Supabase (Limitado a 25 resultados por regla de Discord)
-      // Usamos .ilike para buscar coincidencias parciales
-      const { data, error } = await supabase
+      // Buscamos coincidencias
+      const { data } = await supabase
         .from('base_cards')
         .select(column)
-        .ilike(column, `%${userInput}%`)
-        .limit(50); // Traemos 50 para filtrar duplicados luego
+        .ilike(column, `%${userInput}%`) // ilike = insensible a mayúsculas/minúsculas
+        .limit(25); 
 
-      if (error || !data) return interaction.respond([]);
+      if (!data) return interaction.respond([]);
 
-      // Limpiamos duplicados (Set) y preparamos para Discord
-      // Para 'code', tratamos de mostrar códigos limpios
-      const uniqueValues = [...new Set(data.map(item => item[column]))];
+      // Filtramos duplicados y limpiamos resultados vacíos
+      const uniqueValues = [...new Set(data.map(item => item[column]).filter(val => val))];
       
-      // Discord solo acepta máximo 25 opciones
-      const slicedOptions = uniqueValues.slice(0, 25);
-
+      // Discord solo acepta 25 opciones máximo
       await interaction.respond(
-        slicedOptions.map(choice => ({ name: choice, value: choice }))
+        uniqueValues.slice(0, 25).map(choice => ({ name: choice, value: choice }))
       );
 
     } catch (err) {
-      console.error('Error autocomplete:', err);
-      // Si falla, respondemos vacío para que no se quede cargando infinito
+      // Silencioso en logs para no spamear
       await interaction.respond([]); 
     }
   },
 
   // --- LÓGICA DE EJECUCIÓN ---
   async execute(interaction) {
-    // 1. VERIFICAR PERMISOS
     const memberRoles = interaction.member.roles.cache;
     const hasPermission = ALLOWED_ROLES.some(roleId => memberRoles.has(roleId));
 
-    if (!hasPermission) {
-      return interaction.reply({ content: '🚫 Solo Admins/Managers.', ephemeral: true });
-    }
+    if (!hasPermission) return interaction.reply({ content: '🚫 Solo Admins.', ephemeral: true });
 
     const code = interaction.options.getString('code');
     const group = interaction.options.getString('grupo');
@@ -93,47 +84,46 @@ module.exports = {
     try {
       await interaction.deferReply();
 
+      // Preparamos la actualización
       let query = supabase.from('base_cards').update({ creator: newCreatorName }).select();
       let filterMsg = "";
 
-      // PRIORIDAD 1: CÓDIGO BASE
-      // Si pusiste "WMO", buscará "WMO%" para encontrar WMO1, WMO2, WMO3
+      // CASO 1: POR CÓDIGO (Prioridad)
       if (code) {
-        // Quitamos números finales por si acaso el usuario eligió "WMO1" del autocomplete
-        // pero quería toda la serie. Aunque lo más seguro es usar like.
-        const cleanCode = code.trim(); 
-        
-        // Buscamos cualquier carta que EMPIECE con ese código
-        query = query.ilike('card_code', `${cleanCode}%`);
-        filterMsg = `Código base: ${cleanCode} (y variantes)`;
+        const cleanCode = code.trim();
+        query = query.ilike('card_code', `${cleanCode}%`); // % busca WMO1, WMO2...
+        filterMsg = `Código: ${cleanCode}`;
       } 
-      // PRIORIDAD 2: GRUPO + ERA (Obligatorios ambos si no hay código)
+      // CASO 2: GRUPO + ERA
       else if (group && era) {
-        query = query.eq('group_name', group).eq('era', era);
+        // Usamos ilike para evitar errores de mayúsculas
+        query = query.ilike('group_name', group.trim()).ilike('era', era.trim());
         filterMsg = `Grupo: ${group} | Era: ${era}`;
 
+        // CASO 2.1: CON ARTISTA ESPECÍFICO
         if (artist) {
-            // Buscamos coincidencia parcial en el nombre ("Est Supha" encuentra "Est Supha - Collab")
-            query = query.ilike('name', `%${artist}%`);
-            filterMsg += ` | Artista: ${artist}`;
+            // AQUÍ ESTÁ EL ARREGLO IMPORTANTE:
+            // Usamos %artista% para encontrar "Est Supha" dentro de "Est Supha — Collab"
+            const cleanArtist = artist.trim();
+            query = query.ilike('name', `%${cleanArtist}%`);
+            filterMsg += ` | Artista: ${cleanArtist}`;
         } else {
             filterMsg += ` (Era Completa)`;
         }
       } 
       else {
-        return interaction.editReply('⚠️ **Datos insuficientes.**\nUsa el autocompletado para elegir un `code` O (`grupo` + `era`).');
+        return interaction.editReply('⚠️ Faltan datos: Usa `code` O (`grupo` + `era`).');
       }
 
-      // EJECUTAR UPDATE
+      // Ejecutar
       const { data: updatedCards, error } = await query;
 
       if (error) throw error;
 
       if (!updatedCards || updatedCards.length === 0) {
-        return interaction.editReply(`⚠️ **No se actualizó nada.**\nFiltro intentado: ${filterMsg}\n\nPosible causa: Los datos seleccionados no coinciden exactamente con la base de datos.`);
+        return interaction.editReply(`⚠️ **No se actualizó nada.**\nFiltro usado: ${filterMsg}\nVerifica que el nombre del grupo/era esté bien escrito.`);
       }
 
-      // RESPUESTA EXITOSA
       const embed = new EmbedBuilder()
         .setColor('#00ff00')
         .setTitle('✅ Creador Asignado')
@@ -141,15 +131,15 @@ module.exports = {
         .addFields(
             { name: 'Creador', value: `@${newCreatorName}`, inline: true },
             { name: 'Filtro', value: filterMsg, inline: true },
-            { name: 'Ejemplos', value: updatedCards.slice(0, 3).map(c => `• ${c.name} (${c.card_code})`).join('\n') || '...', inline: false }
+            { name: 'Cartas', value: updatedCards.slice(0, 5).map(c => `• ${c.name}`).join('\n') || 'Varias...', inline: false }
         )
-        .setFooter({ text: 'Verifica usando /photocard o /inventory' });
+        .setFooter({ text: 'Cambios aplicados inmediatamente.' });
 
       await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
       console.error('Error claim_creador:', error);
-      await interaction.editReply('❌ Error de base de datos.');
+      await interaction.editReply('❌ Error al conectar con la base de datos.');
     }
   }
 };
