@@ -3,20 +3,19 @@ const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
-// ROLES PERMITIDOS (Mismos que reset_cooldown)
+// ROLES PERMITIDOS (Managers/Admins)
 const ALLOWED_ROLES = ['1413313501694263357', '1412852141197885464'];
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('claim_creador')
     .setDescription('ADMIN: Reclama la autoría de una carta o era completa.')
-    // Opción A: Por Código
+    // --- TODOS LOS CAMPOS SON OPCIONALES AHORA ---
     .addStringOption(option => 
       option.setName('code')
-        .setDescription('El código único de la carta (ej: AESPA.DRAMA.KARINA)')
+        .setDescription('El código base exacto (ej: TWICE.FANCY.NAYEON)')
         .setRequired(false)
     )
-    // Opción B: Por Detalles (Grupo + Era + [Artista])
     .addStringOption(option => 
       option.setName('grupo')
         .setDescription('Nombre del grupo (ej: Twice)')
@@ -29,7 +28,7 @@ module.exports = {
     )
     .addStringOption(option => 
       option.setName('artista')
-        .setDescription('Nombre del idol (Déjalo vacío para reclamar TODA la era)')
+        .setDescription('Nombre del idol (Opcional si usas Grupo+Era)')
         .setRequired(false)
     ),
 
@@ -40,7 +39,7 @@ module.exports = {
 
     if (!hasPermission) {
       return interaction.reply({ 
-        content: '🚫 **Acceso Denegado:** Solo los administradores pueden gestionar creadores.', 
+        content: '🚫 **Acceso Denegado:** Solo los creadores/admins pueden usar esto.', 
         ephemeral: true 
       });
     }
@@ -50,61 +49,76 @@ module.exports = {
     const era = interaction.options.getString('era');
     const artist = interaction.options.getString('artista');
     
-    // El nombre que aparecerá en la carta (Usuario de Discord)
-    // Usamos 'username' porque tu photocard.js añade el '@' automáticamente.
+    // El nombre que aparecerá en la carta
     const newCreatorName = interaction.user.username; 
 
     try {
       await interaction.deferReply();
-      let query = supabase.from('base_cards').update({ creator: newCreatorName }).select();
 
-      // --- LÓGICA DE FILTRADO ---
-      
-      // CASO 1: Por Código (Prioridad Máxima)
+      // Iniciamos la consulta de actualización en la tabla base_cards
+      let query = supabase.from('base_cards').update({ creator: newCreatorName }).select();
+      let filterDescription = "";
+
+      // --- LÓGICA DE PRIORIDAD ---
+
+      // CASO 1: Si hay CÓDIGO, tiene prioridad máxima.
+      // Busca la carta base exacta (lo que ingresaste en /card_create)
       if (code) {
-        query = query.eq('card_code', code);
+        query = query.eq('card_code', code.trim());
+        filterDescription = `Código exacto: \`${code.trim()}\``;
       } 
-      // CASO 2: Por Grupo y Era
+      // CASO 2: Si no hay código, verificamos GRUPO y ERA (Deben estar ambos)
       else if (group && era) {
-        // Usamos ilike para que no importen las mayúsculas/minúsculas
-        query = query.ilike('group_name', group).ilike('era', era);
-        
-        // Si especificó artista, filtramos solo ese. Si no, ¡actualiza todos!
+        // Usamos 'ilike' para que no importen las mayúsculas/minúsculas
+        query = query.ilike('group_name', group.trim()).ilike('era', era.trim());
+        filterDescription = `Grupo: ${group}, Era: ${era}`;
+
+        // Sub-caso: Si también especificó un ARTISTA
         if (artist) {
-            // Nota: Asumimos que la columna 'name' en DB tiene el formato "Artista - Grupo" o similar.
-            // Usamos ilike con % para buscar que el nombre CONTENGA lo que escribiste.
-            query = query.ilike('name', `%${artist}%`);
+            // Busca que el nombre CONTENGA lo que escribiste (ej: "Nayeon" encontrará "Nayeon - TWICE")
+            query = query.ilike('name', `%${artist.trim()}%`);
+            filterDescription += `, Artista: ${artist}`;
+        } else {
+            filterDescription += ` (Era Completa)`;
         }
       } 
+      // CASO 3: Datos insuficientes
       else {
-        return interaction.editReply('❌ **Faltan datos.** Debes proporcionar el `code` O (`grupo` + `era`).');
+        return interaction.editReply('⚠️ **Faltan datos.**\nDebes proporcionar:\n1. Un `code` exacto.\nO BIEN\n2. `grupo` Y `era` juntos.');
       }
 
-      // EJECUTAR ACTUALIZACIÓN
+      // --- EJECUTAR ACTUALIZACIÓN ---
       const { data: updatedCards, error } = await query;
 
       if (error) throw error;
 
       if (!updatedCards || updatedCards.length === 0) {
-        return interaction.editReply('⚠️ No encontré ninguna carta que coincida con esos datos.');
+        return interaction.editReply(`⚠️ No encontré ninguna carta que coincida con: ${filterDescription}`);
       }
 
       // --- RESPUESTA ---
+      // Preparamos una lista de ejemplo (máximo 5 cartas para no saturar)
+      const exampleList = updatedCards.slice(0, 5).map(c => `• ${c.name} (${c.card_code})`).join('\n');
+      const remainingCount = updatedCards.length > 5 ? `\n...y ${updatedCards.length - 5} más.` : '';
+
       const embed = new EmbedBuilder()
         .setColor('#00ff00')
-        .setTitle('✅ Autoría Reclamada')
-        .setDescription(`Has sido registrado como el creador de **${updatedCards.length}** carta(s).`)
+        .setTitle('✅ Autoría Reclamada Exitosamente')
+        .setDescription(`Se ha actualizado el creador en la base de datos.`)
         .addFields(
-            { name: 'Creador', value: `@${newCreatorName}`, inline: true },
-            { name: 'Cartas actualizadas', value: updatedCards.map(c => `• ${c.name}`).slice(0, 10).join('\n') + (updatedCards.length > 10 ? '\n...y más.' : ''), inline: false }
+            { name: '👤 Nuevo Creador', value: `@${newCreatorName}`, inline: true },
+            { name: '🔢 Cartas Actualizadas', value: `${updatedCards.length}`, inline: true },
+            { name: '📋 Filtro Usado', value: filterDescription, inline: false },
+            { name: 'Ejemplos actualizados', value: exampleList + remainingCount || 'Ninguno', inline: false }
         )
-        .setFooter({ text: 'Aparecerá en el comando /photocard inmediatamente.' });
+        .setFooter({ text: 'Esto se reflejará inmediatamente en el comando /photocard.' })
+        .setTimestamp();
 
       await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
       console.error('Error en claim_creador:', error);
-      await interaction.editReply('❌ Error al actualizar la base de datos.');
+      await interaction.editReply('❌ Error interno al actualizar la base de datos.');
     }
   }
 };
