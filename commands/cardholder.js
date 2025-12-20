@@ -3,7 +3,6 @@ const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
-// --- MEDIDAS OFICIALES (Pixeles exactos) ---
 const SIZES = {
     small:  { w: 543, h: 757,  label: 'Small (543x757)' },
     medium: { w: 642, h: 856,  label: 'Medium (642x856)' },
@@ -14,49 +13,31 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('cardholder')
         .setDescription('🎨 Sistema de marcos decorativos (Cardholders)')
-        // --- SUBCOMANDO: CREATE ---
+        // --- CREATE ---
         .addSubcommand(subcommand =>
-            subcommand
-                .setName('create')
-                .setDescription('Sube tu propio cardholder a la tienda.')
-                .addStringOption(option => 
-                    option.setName('code')
-                        .setDescription('ID único del holder (Máx 5 letras)')
-                        .setMaxLength(5)
-                        .setRequired(true))
-                .addStringOption(option => 
-                    option.setName('name')
-                        .setDescription('Nombre del cardholder')
-                        .setRequired(true))
-                .addStringOption(option => 
-                    option.setName('size')
-                        .setDescription('Tamaño del marco')
-                        .setRequired(true)
-                        .addChoices(
-                            { name: 'Small (543x757)', value: 'small' },
-                            { name: 'Medium (642x856)', value: 'medium' },
-                            { name: 'Big (642x1032)', value: 'big' }
-                        ))
-                .addIntegerOption(option => 
-                    option.setName('price')
-                        .setDescription('Precio de venta (100 - 500)')
-                        .setMinValue(100)
-                        .setMaxValue(500)
-                        .setRequired(true))
-                .addAttachmentOption(option => 
-                    option.setName('image')
-                        .setDescription('Imagen PNG con fondo transparente')
-                        .setRequired(true))
-                .addStringOption(option => 
-                    option.setName('emoji')
-                        .setDescription('Un emoji para identificarlo en la tienda'))
-        )
-        // --- SUBCOMANDO: SHOP (Para verlos) ---
+            subcommand.setName('create').setDescription('Sube tu propio cardholder a la tienda.')
+                .addStringOption(o => o.setName('code').setDescription('ID único (Máx 5 letras)').setMaxLength(5).setRequired(true))
+                .addStringOption(o => o.setName('name').setDescription('Nombre del marco').setRequired(true))
+                .addStringOption(o => o.setName('size').setDescription('Tamaño').setRequired(true).addChoices({ name: 'Small', value: 'small' }, { name: 'Medium', value: 'medium' }, { name: 'Big', value: 'big' }))
+                .addIntegerOption(o => o.setName('price').setDescription('Precio (100-500)').setMinValue(100).setMaxValue(500).setRequired(true))
+                .addAttachmentOption(o => o.setName('image').setDescription('PNG Transparente').setRequired(true))
+                .addStringOption(o => o.setName('emoji').setDescription('Emoji identificador')))
+        // --- SHOP ---
         .addSubcommand(subcommand =>
-            subcommand
-                .setName('shop')
-                .setDescription('Ver los cardholders disponibles en el mercado.')
-        ),
+            subcommand.setName('shop').setDescription('Ver la tienda de marcos.'))
+        // --- BUY ---
+        .addSubcommand(subcommand =>
+            subcommand.setName('buy').setDescription('Comprar un marco de la tienda.')
+                .addStringOption(o => o.setName('holder_code').setDescription('El código del marco a comprar').setRequired(true)))
+        // --- USE (EQUIPAR) ---
+        .addSubcommand(subcommand =>
+            subcommand.setName('use').setDescription('Ponerle un marco a una carta.')
+                .addStringOption(o => o.setName('card_id').setDescription('ID de tu carta (ej. NJ.1234)').setRequired(true))
+                .addStringOption(o => o.setName('holder_code').setDescription('ID del marco (ej. HEART)').setRequired(true)))
+        // --- REMOVE (DESEQUIPAR) ---
+        .addSubcommand(subcommand =>
+            subcommand.setName('remove').setDescription('Quitarle el marco a una carta.')
+                .addStringOption(o => o.setName('card_id').setDescription('ID de tu carta').setRequired(true))),
 
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
@@ -64,12 +45,10 @@ module.exports = {
 
         try {
             // ======================================================
-            // 🎨 LÓGICA DE CREATE
+            // 🎨 CREATE (CREAR MARCO)
             // ======================================================
             if (subcommand === 'create') {
                 await interaction.deferReply();
-
-                // 1. OBTENER DATOS
                 const code = interaction.options.getString('code').toUpperCase().trim();
                 const name = interaction.options.getString('name');
                 const sizeKey = interaction.options.getString('size');
@@ -77,139 +56,133 @@ module.exports = {
                 const attachment = interaction.options.getAttachment('image');
                 const emoji = interaction.options.getString('emoji') || '🎨';
 
-                // 2. VALIDACIONES BÁSICAS
-                // Validar formato de ID (Solo letras/numeros, sin espacios)
-                if (!/^[A-Z0-9]+$/.test(code)) {
-                    return interaction.editReply('❌ El **Code** solo puede contener letras y números (sin espacios ni símbolos).');
-                }
+                if (!/^[A-Z0-9]+$/.test(code)) return interaction.editReply('❌ El Code solo letras y números.');
+                if (attachment.contentType !== 'image/png') return interaction.editReply('❌ Debe ser PNG.');
 
-                // Validar formato de imagen
-                if (attachment.contentType !== 'image/png') {
-                    return interaction.editReply('❌ El archivo debe ser **formato PNG** (para soportar transparencia).');
-                }
-
-                // 3. VALIDACIÓN ESTRICTA DE MEDIDAS 📏
                 const targetSize = SIZES[sizeKey];
-                
-                // Nota: Discord a veces tarda en procesar dimensiones. Si attachment.width es null, es un problema de Discord.
-                if (!attachment.width || !attachment.height) {
-                    return interaction.editReply('⚠️ No pude leer las dimensiones de la imagen. Intenta subirla desde PC o espera un momento.');
+                if (!attachment.width || attachment.width !== targetSize.w || attachment.height !== targetSize.h) {
+                    return interaction.editReply(`❌ Medidas incorrectas. Para **${sizeKey}** deben ser **${targetSize.w}x${targetSize.h}** px.`);
                 }
 
-                if (attachment.width !== targetSize.w || attachment.height !== targetSize.h) {
-                    return interaction.editReply({
-                        content: `❌ **Medidas Incorrectas.**\n` +
-                                 `Elegiste tamaño **${sizeKey.toUpperCase()}**, por lo que tu imagen debe medir exactamente:\n` +
-                                 `➡️ **${targetSize.w} ancho** x **${targetSize.h} alto** px.\n\n` +
-                                 `Tu imagen mide: ${attachment.width}x${attachment.height}.`
-                    });
-                }
+                const { data: existing } = await supabase.from('holders').select('code').eq('code', code).single();
+                if (existing) return interaction.editReply(`❌ El código **${code}** ya existe.`);
 
-                // 4. VERIFICAR SI EL ID YA EXISTE EN DB
-                const { data: existingHolder } = await supabase
-                    .from('holders')
-                    .select('code')
-                    .eq('code', code)
-                    .single();
-
-                if (existingHolder) {
-                    return interaction.editReply(`❌ El código **${code}** ya está en uso. Por favor elige otro.`);
-                }
-
-                // 5. GUARDAR EN SUPABASE
-                const { error: insertError } = await supabase
-                    .from('holders')
-                    .insert({
-                        code: code,
-                        name: name,
-                        creator_id: userId,
-                        image_url: attachment.url,
-                        price: price,
-                        size: sizeKey,
-                        emoji: emoji,
-                        sales_count: 0
-                    });
-
-                if (insertError) throw insertError;
-
-                // 6. DAR EL HOLDER AL CREADOR (Gratis por ser el dueño)
-                // Primero necesitamos el ID numérico que se acaba de crear
-                const { data: newHolder } = await supabase.from('holders').select('id').eq('code', code).single();
-                
-                if (newHolder) {
-                    await supabase.from('user_holders').insert({
-                        user_id: userId,
-                        holder_id: newHolder.id
-                    });
-                }
-
-                // 7. RESPUESTA ÉPICA
-                const embed = new EmbedBuilder()
-                    .setColor('#9b59b6')
-                    .setTitle(`${emoji} Cardholder Creado: ${name}`)
-                    .setDescription(
-                        `¡Tu obra ha sido publicada en el mercado!\n\n` +
-                        `🆔 **ID:** \`${code}\`\n` +
-                        `📏 **Tamaño:** ${targetSize.label}\n` +
-                        `💰 **Precio:** ${price} monedas\n` +
-                        `📉 **Creator Royalty:** Recibirás el dinero de cada venta.`
-                    )
-                    .setThumbnail(attachment.url)
-                    .setImage(attachment.url) // Mostramos preview grande
-                    .setFooter({ text: `Creado por ${interaction.user.username}`, iconURL: interaction.user.displayAvatarURL() });
-
-                await interaction.editReply({ embeds: [embed] });
-            }
-
-            // ======================================================
-            // 🛍️ LÓGICA DE SHOP (BÁSICA POR AHORA)
-            // ======================================================
-            else if (subcommand === 'shop') {
-                await interaction.deferReply();
-
-                const { data: holders, error } = await supabase
-                    .from('holders')
-                    .select('*')
-                    .eq('is_active', true)
-                    .order('created_at', { ascending: false }) // Los más nuevos primero
-                    .limit(10); // Paginación simple
+                const { data: inserted, error } = await supabase.from('holders').insert({
+                    code, name, creator_id: userId, image_url: attachment.url, price, size: sizeKey, emoji
+                }).select().single();
 
                 if (error) throw error;
 
-                if (!holders || holders.length === 0) {
-                    return interaction.editReply('📭 La tienda de cardholders está vacía. ¡Usa `/cardholder create` para ser el primero!');
+                // El creador recibe uno gratis
+                await supabase.from('user_holders').insert({ user_id: userId, holder_id: inserted.id });
+
+                const embed = new EmbedBuilder().setColor('#9b59b6').setTitle(`${emoji} Cardholder Creado`).setDescription(`ID: \`${code}\`\nPrecio: ${price}`).setImage(attachment.url);
+                return interaction.editReply({ embeds: [embed] });
+            }
+
+            // ======================================================
+            // 🛍️ SHOP (TIENDA)
+            // ======================================================
+            else if (subcommand === 'shop') {
+                await interaction.deferReply();
+                const { data: holders } = await supabase.from('holders').select('*').eq('is_active', true).limit(10);
+                
+                if (!holders?.length) return interaction.editReply('📭 Tienda vacía.');
+
+                const embed = new EmbedBuilder().setColor('#e67e22').setTitle('🎨 Tienda de Cardholders');
+                let desc = '';
+                holders.forEach(h => desc += `**${h.emoji} ${h.name}** (\`${h.code}\`)\n💰 **${h.price}** • 📏 ${h.size}\nCreator: <@${h.creator_id}>\n\n`);
+                embed.setDescription(desc + 'Usa `/cardholder buy [code]` para comprar.');
+                if (holders[0].image_url) embed.setThumbnail(holders[0].image_url);
+
+                return interaction.editReply({ embeds: [embed] });
+            }
+
+            // ======================================================
+            // 💰 BUY (COMPRAR)
+            // ======================================================
+            else if (subcommand === 'buy') {
+                await interaction.deferReply();
+                const holderCode = interaction.options.getString('holder_code').toUpperCase();
+
+                // 1. Buscar Holder
+                const { data: holder } = await supabase.from('holders').select('*').eq('code', holderCode).single();
+                if (!holder) return interaction.editReply('❌ Ese marco no existe.');
+
+                // 2. Verificar Dinero del Comprador
+                const { data: buyer } = await supabase.from('users').select('balance').eq('user_id', userId).single();
+                if ((buyer?.balance || 0) < holder.price) return interaction.editReply(`❌ No tienes suficientes monedas. Cuesta **${holder.price}**.`);
+
+                // 3. TRANSACCIÓN ECONÓMICA
+                // Restar al comprador
+                await supabase.from('users').update({ balance: buyer.balance - holder.price }).eq('user_id', userId);
+
+                // Sumar al creador (Royalty)
+                // Obtenemos balance del creador
+                const { data: creator } = await supabase.from('users').select('balance').eq('user_id', holder.creator_id).single();
+                // Si el creador existe (y no es el mismo comprador, aunque permitimos autocompra), le pagamos
+                if (creator) {
+                    await supabase.from('users').update({ balance: creator.balance + holder.price }).eq('user_id', holder.creator_id);
                 }
 
-                const embed = new EmbedBuilder()
-                    .setColor('#e67e22')
-                    .setTitle('🎨 Tienda de Cardholders (Últimos agregados)');
+                // 4. Entregar Item + Update Stats
+                await supabase.from('user_holders').insert({ user_id: userId, holder_id: holder.id });
+                await supabase.from('holders').update({ sales_count: (holder.sales_count || 0) + 1 }).eq('id', holder.id);
 
-                let description = '';
-                holders.forEach(h => {
-                    description += `**${h.emoji} ${h.name}** (\`${h.code}\`)\n` +
-                                   `💰 **${h.price}** • 📏 ${h.size.toUpperCase()} • 👤 <@${h.creator_id}>\n\n`;
-                });
-                
-                // Nota: En el futuro agregaremos botones o menú desplegable para comprar
-                description += `ℹ️ *Usa /cardholder buy [code] para comprar uno (Próximamente)*`;
+                return interaction.editReply(`✅ ¡Compraste el marco **${holder.name}** por ${holder.price} monedas!`);
+            }
 
-                embed.setDescription(description);
+            // ======================================================
+            // 🖼️ USE (EQUIPAR)
+            // ======================================================
+            else if (subcommand === 'use') {
+                await interaction.deferReply();
+                const cardId = interaction.options.getString('card_id');
+                const holderCode = interaction.options.getString('holder_code').toUpperCase();
+
+                // 1. Buscar Carta (debe ser tuya)
+                const { data: card } = await supabase.from('user_cards').select('id, unique_card_id').eq('unique_card_id', cardId).eq('user_id', userId).single();
+                if (!card) return interaction.editReply('❌ No encontré esa carta en tu inventario.');
+
+                // 2. Buscar Holder (Info General)
+                const { data: holderInfo } = await supabase.from('holders').select('id, name').eq('code', holderCode).single();
+                if (!holderInfo) return interaction.editReply('❌ Ese código de marco no existe.');
+
+                // 3. CONTAR INVENTARIO (Lógica inteligente)
+                // ¿Cuántos tengo comprados?
+                const { count: ownedCount } = await supabase.from('user_holders').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('holder_id', holderInfo.id);
                 
-                // Mostramos la imagen del último como "destacado"
-                if (holders[0].image_url) {
-                    embed.setThumbnail(holders[0].image_url);
+                // ¿Cuántos estoy usando ya?
+                const { count: usedCount } = await supabase.from('user_cards').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('equipped_holder_id', holderInfo.id);
+
+                if (!ownedCount || ownedCount <= usedCount) {
+                    return interaction.editReply(`❌ No tienes copias disponibles de **${holderInfo.name}**.\nTienes **${ownedCount || 0}** y estás usando **${usedCount || 0}**.\n🛒 Compra más en la tienda.`);
                 }
 
-                await interaction.editReply({ embeds: [embed] });
+                // 4. Equipar
+                await supabase.from('user_cards').update({ equipped_holder_id: holderInfo.id }).eq('id', card.id);
+
+                return interaction.editReply(`✅ Marco **${holderInfo.name}** equipado en la carta \`${cardId}\`.`);
+            }
+
+            // ======================================================
+            // 🔧 REMOVE (QUITAR)
+            // ======================================================
+            else if (subcommand === 'remove') {
+                await interaction.deferReply();
+                const cardId = interaction.options.getString('card_id');
+
+                const { data: card } = await supabase.from('user_cards').select('id').eq('unique_card_id', cardId).eq('user_id', userId).single();
+                if (!card) return interaction.editReply('❌ No encontré esa carta.');
+
+                await supabase.from('user_cards').update({ equipped_holder_id: null }).eq('id', card.id);
+
+                return interaction.editReply(`✅ Se ha quitado el marco de la carta \`${cardId}\`.`);
             }
 
         } catch (error) {
-            console.error('Error en /cardholder:', error);
-            if (!interaction.deferred && !interaction.replied) {
-                await interaction.reply({ content: '❌ Error interno del sistema.', ephemeral: true });
-            } else {
-                await interaction.editReply('❌ Ocurrió un error al procesar tu solicitud.');
-            }
+            console.error('Error cardholder:', error);
+            interaction.editReply('❌ Error interno. Revisa la consola o intenta de nuevo.').catch(() => {});
         }
     }
 };
