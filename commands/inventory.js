@@ -171,12 +171,13 @@ module.exports = {
 
       // --- MODO CARTAS ---
       
-      // 1. Cargar Cartas
+      // 1. Cargar Cartas + HOLDERS (MODIFICADO)
       let query = supabase
         .from('user_cards')
         .select(`
           id, rarity, unique_card_id,
-          base_cards!inner (name, group_name, rarity, rarity_level, era, card_code)
+          base_cards!inner (name, group_name, rarity, rarity_level, era, card_code),
+          holders!equipped_holder_id (emoji)
         `)
         .eq('user_id', inventoryOwnerId);
 
@@ -230,7 +231,10 @@ module.exports = {
                 const isNft = nftGroups.has(group.toLowerCase()) || nftIdols.has(cleanName.toLowerCase());
                 const nftStatus = isNft ? ` ${nftEmoji}` : '';
 
-                return `${rarity.stars} ${cleanName} — ${group} (${era})${nftStatus}\n\`${code}\``;
+                // (MODIFICADO) EMOJI DEL HOLDER
+                const holderEmoji = c.holders ? ` ${c.holders.emoji}` : '';
+
+                return `${rarity.stars} ${cleanName}${holderEmoji} — ${group} (${era})${nftStatus}\n\`${code}\``;
               }).join('\n\n')
           )
           .setFooter({ text: `Página ${page + 1}/${Math.ceil(cards.length / pageSize)} • Total: ${cards.length} cartas` })
