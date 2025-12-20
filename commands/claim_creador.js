@@ -1,6 +1,8 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 
+// Nota: Asegúrate de que esta tabla (base_cards) tenga políticas RLS que permitan UPDATE
+// o que el RLS esté desactivado, sino devolverá 0 cambios siempre.
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 // ROLES PERMITIDOS
@@ -38,32 +40,27 @@ module.exports = {
 
     try {
       let column;
-      // Mapeamos la opción al nombre real de la columna en Supabase
       if (focusedOption.name === 'grupo') column = 'group_name';
       else if (focusedOption.name === 'era') column = 'era';
       else if (focusedOption.name === 'artista') column = 'name';
       else if (focusedOption.name === 'code') column = 'card_code';
       else return interaction.respond([]);
 
-      // Buscamos coincidencias
       const { data } = await supabase
         .from('base_cards')
         .select(column)
-        .ilike(column, `%${userInput}%`) // ilike = insensible a mayúsculas/minúsculas
+        .ilike(column, `%${userInput}%`)
         .limit(25); 
 
       if (!data) return interaction.respond([]);
 
-      // Filtramos duplicados y limpiamos resultados vacíos
       const uniqueValues = [...new Set(data.map(item => item[column]).filter(val => val))];
       
-      // Discord solo acepta 25 opciones máximo
       await interaction.respond(
         uniqueValues.slice(0, 25).map(choice => ({ name: choice, value: choice }))
       );
 
     } catch (err) {
-      // Silencioso en logs para no spamear
       await interaction.respond([]); 
     }
   },
@@ -84,26 +81,27 @@ module.exports = {
     try {
       await interaction.deferReply();
 
-      // Preparamos la actualización
       let query = supabase.from('base_cards').update({ creator: newCreatorName }).select();
       let filterMsg = "";
 
-      // CASO 1: POR CÓDIGO (Prioridad)
+      // CASO 1: POR CÓDIGO
       if (code) {
         const cleanCode = code.trim();
-        query = query.ilike('card_code', `${cleanCode}%`); // % busca WMO1, WMO2...
+        // Corrección: Usamos backticks `` para insertar la variable correctamente
+        // El % al final permite que si pones "WIN3" encuentre "WIN3", "WIN3.1", "WIN3-A"
+        query = query.ilike('card_code', `${cleanCode}%`); 
         filterMsg = `Código: ${cleanCode}`;
       } 
       // CASO 2: GRUPO + ERA
       else if (group && era) {
-        // Usamos ilike para evitar errores de mayúsculas
-        query = query.ilike('group_name', group.trim()).ilike('era', era.trim());
+        // Corrección: Agregamos % a ambos lados.
+        // Esto soluciona si en la DB hay espacios extra tipo "Solista " o " Solista"
+        query = query.ilike('group_name', `%${group.trim()}%`)
+                     .ilike('era', `%${era.trim()}%`);
+        
         filterMsg = `Grupo: ${group} | Era: ${era}`;
 
-        // CASO 2.1: CON ARTISTA ESPECÍFICO
         if (artist) {
-            // AQUÍ ESTÁ EL ARREGLO IMPORTANTE:
-            // Usamos %artista% para encontrar "Est Supha" dentro de "Est Supha — Collab"
             const cleanArtist = artist.trim();
             query = query.ilike('name', `%${cleanArtist}%`);
             filterMsg += ` | Artista: ${cleanArtist}`;
@@ -115,13 +113,14 @@ module.exports = {
         return interaction.editReply('⚠️ Faltan datos: Usa `code` O (`grupo` + `era`).');
       }
 
-      // Ejecutar
       const { data: updatedCards, error } = await query;
 
       if (error) throw error;
 
       if (!updatedCards || updatedCards.length === 0) {
-        return interaction.editReply(`⚠️ **No se actualizó nada.**\nFiltro usado: ${filterMsg}\nVerifica que el nombre del grupo/era esté bien escrito.`);
+        // Si entra aquí, es 99% seguro un tema de RLS (Permisos de Supabase)
+        // o que los datos no coinciden ni siquiera con los comodines.
+        return interaction.editReply(`⚠️ **No se actualizó nada.**\nFiltro usado: ${filterMsg}\n\n**Posible causa:** Revisa si la tabla \`base_cards\` tiene el RLS activado en Supabase.`);
       }
 
       const embed = new EmbedBuilder()
@@ -131,7 +130,7 @@ module.exports = {
         .addFields(
             { name: 'Creador', value: `@${newCreatorName}`, inline: true },
             { name: 'Filtro', value: filterMsg, inline: true },
-            { name: 'Cartas', value: updatedCards.slice(0, 5).map(c => `• ${c.name}`).join('\n') || 'Varias...', inline: false }
+            { name: 'Ejemplos', value: updatedCards.slice(0, 5).map(c => `• ${c.name} (${c.card_code})`).join('\n') || 'Varias...', inline: false }
         )
         .setFooter({ text: 'Cambios aplicados inmediatamente.' });
 
