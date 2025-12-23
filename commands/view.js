@@ -4,7 +4,6 @@ const { createCanvas, loadImage } = require('@napi-rs/canvas');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
-// Configuración para el Canvas Individual (Estilo Garam)
 const CANVAS_CONFIG = {
     w: 642,
     h: 1032
@@ -33,7 +32,7 @@ module.exports = {
     }
 
     try {
-      // 2. Buscar cartas en DB (INCLUYENDO HOLDERS)
+      // 2. Buscar cartas en DB
       const { data: userCards, error } = await supabase
         .from('user_cards')
         .select(`
@@ -51,7 +50,7 @@ module.exports = {
         return interaction.reply({ content: '❌ Error de conexión al buscar las cartas.', ephemeral: true });
       }
 
-      // === 3. VALIDACIÓN ===
+      // 3. VALIDACIÓN
       const foundIds = userCards ? userCards.map(c => c.unique_card_id) : [];
       const invalidCodes = codes.filter(code => !foundIds.includes(code));
 
@@ -71,7 +70,7 @@ module.exports = {
       await interaction.deferReply(); 
 
       // =========================================================
-      // 🅰️ MODO SINGLE (SHOWCASE - ESTILO GARAM)
+      // 🅰️ MODO SINGLE (MODIFICADO)
       // =========================================================
       if (userCards.length === 1) {
           const card = userCards[0];
@@ -98,32 +97,40 @@ module.exports = {
 
           const attachment = new AttachmentBuilder(await canvas.encode('png'), { name: `card-${card.unique_card_id}.png` });
 
-          // Embed Detallado
+          // --- CONSTRUCCIÓN DEL EMBED ---
           const date = new Date(card.created_at).toLocaleDateString('es-ES');
           const cardCreator = base.creator ? `@${base.creator}` : 'System';
           
-          let description = `**${base.name}** of **${base.group_name}** evento ${base.era} ✨\n`;
-          description += `${card.rarity} - \`${card.unique_card_id}\`\n`;
-          description += `Dropped at ${date}, Made by ${cardCreator}.\n\n`;
+          // 1. Título DINÁMICO: [Nombre] del grupo [Grupo] era [Era]
+          // Usamos 'base.name' que viene de la DB (el nombre del artista/personaje)
+          const titulo = `${base.name} del grupo ${base.group_name} era ${base.era}`;
 
-          if (holder) {
-              description += `Card holder \`${holder.code}\`: ${holder.emoji} ${holder.name}\n`;
-              description += `\`${holder.code}\` Made by <@${holder.creator_id}>`;
-          } else {
-              description += `*No card holder equipped*`;
-          }
+          // 2. Descripción (Solo rareza, ID, fecha y creador)
+          const description = `${card.rarity} - \`${card.unique_card_id}\`\nDropped at ${date}, Made by ${cardCreator}.`;
 
           const embed = new EmbedBuilder()
               .setColor(holder ? '#9b59b6' : '#2ecc71')
+              .setTitle(titulo) // Aquí se aplica el título nuevo
               .setDescription(description)
               .setImage(`attachment://card-${card.unique_card_id}.png`)
               .setFooter({ text: `Owner: ${interaction.user.username}`, iconURL: interaction.user.displayAvatarURL() });
+
+          // 3. Detalles del Holder (Si existe)
+          if (holder) {
+              const detallesHolder = `Card holder \`${holder.code}\`: ${holder.emoji} ${holder.name}\n\`${holder.code}\` Made by <@${holder.creator_id}>`;
+              
+              embed.addFields({ 
+                  name: 'Detalles', 
+                  value: detallesHolder, 
+                  inline: false 
+              });
+          }
 
           return interaction.editReply({ embeds: [embed], files: [attachment] });
       }
 
       // =========================================================
-      // 🅱️ MODO GRID (MULTIVIEW) - TU CÓDIGO ORIGINAL INTACTO
+      // 🅱️ MODO GRID (MULTIVIEW) - SIN CAMBIOS
       // =========================================================
       const cardWidth = 200;
       const cardHeight = 300;
@@ -140,7 +147,6 @@ module.exports = {
       const canvas = createCanvas(finalWidth, finalHeight);
       const ctx = canvas.getContext('2d');
 
-      // 6. CARGAR IMÁGENES
       const loadedImages = await Promise.all(
         userCards.map(async (card) => {
           try {
@@ -154,7 +160,6 @@ module.exports = {
 
       const validCards = loadedImages.filter(c => c !== null);
 
-      // 7. DIBUJAR
       for (let i = 0; i < validCards.length; i++) {
         const card = validCards[i];
         
@@ -164,8 +169,7 @@ module.exports = {
         const x = gap + (col * (cardWidth + gap));
         const y = gap + (row * (cardHeight + textSpace + gap));
 
-        // -- DIBUJO CON BORDE REDONDEADO --
-        const radius = 15; // Radio del borde
+        const radius = 15;
         ctx.save();
         ctx.beginPath();
         ctx.moveTo(x + radius, y);
@@ -183,7 +187,6 @@ module.exports = {
         ctx.drawImage(card.img, x, y, cardWidth, cardHeight);
         ctx.restore();
 
-        // -- TEXTO (Código) --
         const prefix = card.unique_card_id.split('.')[0];
 
         ctx.font = '16px Arial'; 
@@ -202,7 +205,6 @@ module.exports = {
 
       const attachment = new AttachmentBuilder(await canvas.encode('png'), { name: 'collection-view.png' });
 
-      // 8. ENVIAR IMAGEN PÚBLICA
       await interaction.editReply({ 
         content: `📸 Vista de colección de <@${userId}>`, 
         files: [attachment] 
