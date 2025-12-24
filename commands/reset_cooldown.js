@@ -8,14 +8,15 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANO
 const ALLOWED_ROLES = ['1413313501694263357', '1412852141197885464'];
 
 // MAPA DE CONFIGURACIÓN
-// Define qué columnas poner a 0 para cada comando
+// Actualizado para resetear también el estado de notificación (_notified: false)
+// Así el sistema de reminders sabe que el usuario vuelve a estar "pendiente"
 const COMMAND_DB_MAP = {
-  'photocard': { last_photocard_claim: 0 },
-  'work':      { last_work_claim: 0 },
-  'daily':     { last_daily_claim: 0 },
-  'weekly':    { last_weekly_claim: 0 },
-  'alpha':     { alpha_uses: 0, alpha_reset_time: 0 },      
-  'licuadora': { licuadora_uses: 0, licuadora_reset_time: 0 } 
+  'photocard': { last_photocard_claim: 0, photocard_notified: false },
+  'work':      { last_work_claim: 0, work_notified: false },
+  'daily':     { last_daily_claim: 0, daily_notified: false },
+  'weekly':    { last_weekly_claim: 0, weekly_notified: false },
+  'alpha':     { alpha_uses: 0, alpha_reset_time: 0, alpha_notified: false },      
+  'licuadora': { licuadora_uses: 0, licuadora_reset_time: 0, licuadora_notified: false } 
 };
 
 module.exports = {
@@ -47,33 +48,35 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    // 1. Verificar Permisos (Roles)
-    const memberRoles = interaction.member.roles.cache;
-    const hasPermission = ALLOWED_ROLES.some(roleId => memberRoles.has(roleId));
-
-    if (!hasPermission) {
-      return interaction.reply({ 
-        content: '🚫 **Acceso Denegado:** No tienes permisos de administrador para usar este comando.', 
-        ephemeral: true 
-      });
-    }
-
-    // 2. Obtener datos
-    const targetUser = interaction.options.getUser('usuario');
-    const commandName = interaction.options.getString('comando');
-    const reason = interaction.options.getString('razon') || 'Sin razón especificada';
-
-    // 3. Obtener qué columnas hay que limpiar
-    const updateData = COMMAND_DB_MAP[commandName];
-
-    if (!updateData) {
-      return interaction.reply({ content: '❌ Error de configuración: El comando no está en la lista de reseteo.', ephemeral: true });
-    }
+    // 1. AVISO INMEDIATO (Vital para evitar el crash de timeout)
+    // Esto le dice a Discord "Estoy procesando", dándote 15 minutos en vez de 3 segundos.
+    await interaction.deferReply(); 
 
     try {
-      await interaction.deferReply();
+      // 2. Verificar Permisos (Roles)
+      const memberRoles = interaction.member.roles.cache;
+      const hasPermission = ALLOWED_ROLES.some(roleId => memberRoles.has(roleId));
 
-      // 4. Actualizar Supabase directamente
+      if (!hasPermission) {
+        // Usamos editReply porque ya usamos deferReply arriba
+        return interaction.editReply({ 
+          content: '🚫 **Acceso Denegado:** No tienes permisos de administrador para usar este comando.'
+        });
+      }
+
+      // 3. Obtener datos
+      const targetUser = interaction.options.getUser('usuario');
+      const commandName = interaction.options.getString('comando');
+      const reason = interaction.options.getString('razon') || 'Sin razón especificada';
+
+      // 4. Obtener configuración
+      const updateData = COMMAND_DB_MAP[commandName];
+
+      if (!updateData) {
+        return interaction.editReply({ content: '❌ Error de configuración: El comando no está en la lista de reseteo.' });
+      }
+
+      // 5. Actualizar Supabase
       const { error } = await supabase
         .from('users')
         .update(updateData)
@@ -84,14 +87,15 @@ module.exports = {
         return interaction.editReply({ content: '❌ Ocurrió un error al intentar actualizar la base de datos.' });
       }
 
-      // 5. Confirmación
+      // 6. Confirmación
       return interaction.editReply({
-        content: `✅ **Cooldown Reseteado (Base de Datos)**\n\n👤 **Usuario:** ${targetUser}\n⚙️ **Comando:** \`/${commandName}\`\n📝 **Razón:** ${reason}`
+        content: `✅ **Cooldown Reseteado Correctamente**\n\n👤 **Usuario:** ${targetUser}\n⚙️ **Comando:** \`/${commandName}\`\n📝 **Razón:** ${reason}`
       });
 
     } catch (error) {
       console.error('Error en reset_cooldown:', error);
-      return interaction.editReply({ content: '❌ Ocurrió un error interno.', ephemeral: true });
+      // Intentamos editar la respuesta si aún es posible
+      return interaction.editReply({ content: '❌ Ocurrió un error interno al ejecutar el comando.' }).catch(() => {});
     }
   }
 };
