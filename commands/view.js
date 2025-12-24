@@ -2,6 +2,7 @@ const { SlashCommandBuilder, AttachmentBuilder, EmbedBuilder } = require('discor
 const { createClient } = require('@supabase/supabase-js');
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
 
+// Asegúrate de que las env vars estén cargadas (normalmente index.js ya lo hace, pero por si acaso)
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 const CANVAS_CONFIG = {
@@ -70,7 +71,7 @@ module.exports = {
       await interaction.deferReply(); 
 
       // =========================================================
-      // 🅰️ MODO SINGLE (MODIFICADO)
+      // 🅰️ MODO SINGLE
       // =========================================================
       if (userCards.length === 1) {
           const card = userCards[0];
@@ -101,24 +102,18 @@ module.exports = {
           const date = new Date(card.created_at).toLocaleDateString('es-ES');
           const cardCreator = base.creator ? `@${base.creator}` : 'System';
           
-          // 1. Título DINÁMICO: [Nombre] del grupo [Grupo] era [Era]
-          // Usamos 'base.name' que viene de la DB (el nombre del artista/personaje)
           const titulo = `${base.name} del grupo ${base.group_name} era ${base.era}`;
-
-          // 2. Descripción (Solo rareza, ID, fecha y creador)
           const description = `${card.rarity} - \`${card.unique_card_id}\`\nDropped at ${date}, Made by ${cardCreator}.`;
 
           const embed = new EmbedBuilder()
               .setColor(holder ? '#9b59b6' : '#2ecc71')
-              .setTitle(titulo) // Aquí se aplica el título nuevo
+              .setTitle(titulo)
               .setDescription(description)
               .setImage(`attachment://card-${card.unique_card_id}.png`)
               .setFooter({ text: `Owner: ${interaction.user.username}`, iconURL: interaction.user.displayAvatarURL() });
 
-          // 3. Detalles del Holder (Si existe)
           if (holder) {
               const detallesHolder = `Card holder \`${holder.code}\`: ${holder.emoji} ${holder.name}\n\`${holder.code}\` Made by <@${holder.creator_id}>`;
-              
               embed.addFields({ 
                   name: 'Detalles', 
                   value: detallesHolder, 
@@ -130,7 +125,7 @@ module.exports = {
       }
 
       // =========================================================
-      // 🅱️ MODO GRID (MULTIVIEW) - SIN CAMBIOS
+      // 🅱️ MODO GRID (MULTIVIEW)
       // =========================================================
       const cardWidth = 200;
       const cardHeight = 300;
@@ -216,9 +211,7 @@ module.exports = {
           await interaction.editReply({ content: '❌ Ocurrió un error al generar la imagen.' }).catch(() => {});
       } else {
           await interaction.reply({ content: '❌ Ocurrió un error interno.', ephemeral: true }).catch(() => {});
+      }
     }
-  }
+  } // <--- ¡AQUÍ ESTABA EL ERROR! Faltaba cerrar la función execute
 };
-
-
-
