@@ -240,6 +240,8 @@ if (!token) {
     console.error("Debe llamarse exactamente: DISCORD_TOKEN");
 } else {
     console.log(`✅ Token detectado (${token.length} caracteres). Intentando conectar a Discord...`);
+    // 🔍 CHISMOSO ACTIVADO
+client.on("debug", (e) => console.log(e));
     
     client.login(token)
         .then(() => {
@@ -261,3 +263,4 @@ if (!token) {
             console.error("------------------------------------------------\n");
         });
 }
+
