@@ -216,6 +216,9 @@ module.exports = {
           await interaction.editReply({ content: '❌ Ocurrió un error al generar la imagen.' }).catch(() => {});
       } else {
           await interaction.reply({ content: '❌ Ocurrió un error interno.', ephemeral: true }).catch(() => {});
-      }
     }
-  };
+  }
+};
+
+
+
