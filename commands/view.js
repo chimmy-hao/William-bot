@@ -2,7 +2,7 @@ const { SlashCommandBuilder, AttachmentBuilder, EmbedBuilder } = require('discor
 const { createClient } = require('@supabase/supabase-js');
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
 
-// Asegúrate de que las env vars estén cargadas (normalmente index.js ya lo hace, pero por si acaso)
+// Asegúrate de que las env vars estén cargadas
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 const CANVAS_CONFIG = {
@@ -40,7 +40,7 @@ module.exports = {
           unique_card_id,
           rarity,
           created_at,
-          base_cards (image_url, name, group_name, era, creator),
+          base_cards (image_url, name, group_name, era, creator_id), 
           holders!equipped_holder_id (code, image_url, name, emoji, creator_id)
         `)
         .in('unique_card_id', codes)
@@ -71,7 +71,7 @@ module.exports = {
       await interaction.deferReply(); 
 
       // =========================================================
-      // 🅰️ MODO SINGLE
+      // 🅰️ MODO SINGLE (DISEÑO SOLICITADO)
       // =========================================================
       if (userCards.length === 1) {
           const card = userCards[0];
@@ -88,7 +88,7 @@ module.exports = {
               ctx.drawImage(cardImg, 0, 0, CANVAS_CONFIG.w, CANVAS_CONFIG.h);
           } catch (e) { console.error("Error img carta:", e); }
 
-          // Dibujar Holder
+          // Dibujar Holder (si tiene)
           if (holder && holder.image_url) {
               try {
                   const holderImg = await loadImage(holder.image_url);
@@ -100,32 +100,34 @@ module.exports = {
 
           // --- CONSTRUCCIÓN DEL EMBED ---
           const date = new Date(card.created_at).toLocaleDateString('es-ES');
-          const cardCreator = base.creator ? `@${base.creator}` : 'System';
           
-          const titulo = `${base.name} del grupo ${base.group_name} era ${base.era}`;
-          const description = `${card.rarity} - \`${card.unique_card_id}\`\nDropped at ${date}, Made by ${cardCreator}.`;
+          // CAMBIO AQUÍ: Si hay ID usa mención, sino "William Staff"
+          const maker = base.creator_id ? `<@${base.creator_id}>` : 'William Staff';
+
+          // Construimos la descripción línea por línea
+          let description = `\`${card.unique_card_id}\`\n`;
+          description += `Dropped at ${date}, Made by ${maker}\n`;
+          
+          // Detalles del holder si existen
+          if (holder) {
+              description += `*Holder equipado: ${holder.emoji} ${holder.name}*`;
+          }
 
           const embed = new EmbedBuilder()
-              .setColor(holder ? '#9b59b6' : '#2ecc71')
-              .setTitle(titulo)
+              .setColor('#2c2d31')
+              .setTitle(`${base.name} del grupo ${base.group_name} era ${base.era}`)
               .setDescription(description)
               .setImage(`attachment://card-${card.unique_card_id}.png`)
-              .setFooter({ text: `Owner: ${interaction.user.username}`, iconURL: interaction.user.displayAvatarURL() });
-
-          if (holder) {
-              const detallesHolder = `Card holder \`${holder.code}\`: ${holder.emoji} ${holder.name}\n\`${holder.code}\` Made by <@${holder.creator_id}>`;
-              embed.addFields({ 
-                  name: 'Detalles', 
-                  value: detallesHolder, 
-                  inline: false 
+              .setFooter({ 
+                  text: `Owner: ${interaction.user.username}`, 
+                  iconURL: interaction.user.displayAvatarURL() 
               });
-          }
 
           return interaction.editReply({ embeds: [embed], files: [attachment] });
       }
 
       // =========================================================
-      // 🅱️ MODO GRID (MULTIVIEW)
+      // 🅱️ MODO GRID (MULTIVIEW) - SE MANTIENE IGUAL
       // =========================================================
       const cardWidth = 200;
       const cardHeight = 300;
@@ -164,6 +166,7 @@ module.exports = {
         const x = gap + (col * (cardWidth + gap));
         const y = gap + (row * (cardHeight + textSpace + gap));
 
+        // Bordes redondeados
         const radius = 15;
         ctx.save();
         ctx.beginPath();
@@ -182,6 +185,7 @@ module.exports = {
         ctx.drawImage(card.img, x, y, cardWidth, cardHeight);
         ctx.restore();
 
+        // Texto del código debajo
         const prefix = card.unique_card_id.split('.')[0];
 
         ctx.font = '16px Arial'; 
@@ -213,5 +217,5 @@ module.exports = {
           await interaction.reply({ content: '❌ Ocurrió un error interno.', ephemeral: true }).catch(() => {});
       }
     }
-  } // <--- ¡AQUÍ ESTABA EL ERROR! Faltaba cerrar la función execute
+  } 
 };
