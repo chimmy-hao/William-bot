@@ -74,16 +74,18 @@ module.exports = {
 
       // Insertar cartas en DB (usar insert, no upsert)
       // SOLO el card_code base, sin secuencia
+      // MODIFICACIÓN AQUÍ: Se eliminó la concatenación del grupo en "name"
       const cards = [
-        { card_code: `${baseId}1`, name: `${idol} — ${group}`, group_name: group, image_url: up1.secure_url, rarity: 'common', rarity_level: 1, era },
-        { card_code: `${baseId}2`, name: `${idol} — ${group}`, group_name: group, image_url: up2.secure_url, rarity: 'rare', rarity_level: 2, era },
-        { card_code: `${baseId}3`, name: `${idol} — ${group}`, group_name: group, image_url: up3.secure_url, rarity: 'legendary', rarity_level: 3, era }
+        { card_code: `${baseId}1`, name: idol, group_name: group, image_url: up1.secure_url, rarity: 'common', rarity_level: 1, era },
+        { card_code: `${baseId}2`, name: idol, group_name: group, image_url: up2.secure_url, rarity: 'rare', rarity_level: 2, era },
+        { card_code: `${baseId}3`, name: idol, group_name: group, image_url: up3.secure_url, rarity: 'legendary', rarity_level: 3, era }
       ];
 
       const { error } = await supabase.from('base_cards').insert(cards);
       if (error) throw new Error(error.message);
 
       // Crear anuncio con emojis según rareza y código base
+      // NOTA: Aquí dejé el formato visual completo para el anuncio de Discord, que se ve mejor así.
       const embed = new EmbedBuilder()
         .setColor('#2c2d31')
         .setTitle('✨ New photocards have been added!')
@@ -111,4 +113,3 @@ module.exports = {
     }
   },
 };
-
