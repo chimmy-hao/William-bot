@@ -2,7 +2,7 @@ const { SlashCommandBuilder, AttachmentBuilder, EmbedBuilder } = require('discor
 const { createClient } = require('@supabase/supabase-js');
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
 
-// Asegúrate de que las env vars estén cargadas
+// Carga de credenciales
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 const CANVAS_CONFIG = {
@@ -34,14 +34,15 @@ module.exports = {
 
     try {
       // 2. Buscar cartas en DB
+      // AHORA SÍ: Usamos 'creator' que es la columna real de tu tabla base_cards
       const { data: userCards, error } = await supabase
         .from('user_cards')
         .select(`
           unique_card_id,
           rarity,
           created_at,
-          base_cards (image_url, name, group_name, era, creator_id), 
-          holders!equipped_holder_id (code, image_url, name, emoji, creator_id)
+          base_cards (image_url, name, group_name, era, creator), 
+          holders!equipped_holder_id (code, image_url, name, emoji)
         `)
         .in('unique_card_id', codes)
         .eq('user_id', userId);
@@ -88,7 +89,7 @@ module.exports = {
               ctx.drawImage(cardImg, 0, 0, CANVAS_CONFIG.w, CANVAS_CONFIG.h);
           } catch (e) { console.error("Error img carta:", e); }
 
-          // Dibujar Holder (si tiene)
+          // Dibujar Holder
           if (holder && holder.image_url) {
               try {
                   const holderImg = await loadImage(holder.image_url);
@@ -101,14 +102,14 @@ module.exports = {
           // --- CONSTRUCCIÓN DEL EMBED ---
           const date = new Date(card.created_at).toLocaleDateString('es-ES');
           
-          // CAMBIO AQUÍ: Si hay ID usa mención, sino "William Staff"
-          const maker = base.creator_id ? `<@${base.creator_id}>` : 'William Staff';
+          // LÓGICA DE CREADOR:
+          // Usamos 'base.creator'. Si está vacío, usa el default.
+          // Nota: Como es texto (ej: "William System"), saldrá como texto, no como mención azul.
+          const maker = base.creator || 'William System';
 
-          // Construimos la descripción línea por línea
           let description = `\`${card.unique_card_id}\`\n`;
           description += `Dropped at ${date}, Made by ${maker}\n`;
           
-          // Detalles del holder si existen
           if (holder) {
               description += `*Holder equipado: ${holder.emoji} ${holder.name}*`;
           }
@@ -127,7 +128,7 @@ module.exports = {
       }
 
       // =========================================================
-      // 🅱️ MODO GRID (MULTIVIEW) - SE MANTIENE IGUAL
+      // 🅱️ MODO GRID (MULTIVIEW) - SIN CAMBIOS
       // =========================================================
       const cardWidth = 200;
       const cardHeight = 300;
@@ -166,7 +167,6 @@ module.exports = {
         const x = gap + (col * (cardWidth + gap));
         const y = gap + (row * (cardHeight + textSpace + gap));
 
-        // Bordes redondeados
         const radius = 15;
         ctx.save();
         ctx.beginPath();
@@ -185,7 +185,6 @@ module.exports = {
         ctx.drawImage(card.img, x, y, cardWidth, cardHeight);
         ctx.restore();
 
-        // Texto del código debajo
         const prefix = card.unique_card_id.split('.')[0];
 
         ctx.font = '16px Arial'; 
