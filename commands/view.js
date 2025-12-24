@@ -217,30 +217,5 @@ module.exports = {
       } else {
           await interaction.reply({ content: '❌ Ocurrió un error interno.', ephemeral: true }).catch(() => {});
       }
-    // === CÓDIGO DE DIAGNÓSTICO (Pon esto al final) ===
-
-console.log("🔍 DIAGNÓSTICO INICIADO");
-loadCommands();
-
-const token = process.env.DISCORD_TOKEN;
-
-if (!token) {
-    console.error("❌ ERROR FATAL: La variable DISCORD_TOKEN está vacía o no existe.");
-    console.error("👉 Revisa la pestaña ENVIRONMENT en Render.");
-} else {
-    console.log(`✅ Token detectado (Longitud: ${token.length} caracteres). Intentando conectar...`);
-    
-    // Intentamos conectar con reporte de error explícito
-    client.login(token)
-        .then(() => {
-            console.log("🎉 ¡LOGIN PROMISE RESUELTA!"); 
-        })
-        .catch((error) => {
-            console.error("\n🚨🚨 ERROR CRÍTICO AL CONECTAR CON DISCORD 🚨🚨");
-            console.error("Tipo de error:", error.name);
-            console.error("Mensaje:", error.message);
-            if (error.code) console.error("Código:", error.code);
-            console.error("------------------------------------------------\n");
-        });
-}
-
+    }
+  };
