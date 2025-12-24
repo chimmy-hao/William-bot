@@ -24,7 +24,7 @@ server.listen(PORT, () => {
 // CONFIGURACIÓN DEL BOT
 // ==========================================
 
-// Conexión Supabase (Manejo de error si faltan claves)
+// Conexión Supabase
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
 let supabase;
@@ -121,7 +121,7 @@ const COOLDOWNS = {
 
 setInterval(async () => {
     try {
-        if (!supabase) return; // Si no hay supabase, no hacemos nada
+        if (!supabase) return; 
         const now = Date.now();
         
         const { data: users, error } = await supabase
@@ -139,7 +139,6 @@ setInterval(async () => {
             let messages = [];
             let shouldSend = false;
 
-            // Lógica de notificaciones (Work, Photocard, etc...)
             if (user.work_notified === false && now >= (user.last_work_claim || 0) + COOLDOWNS.WORK) {
                 updates.work_notified = true;
                 if (user.pref_work !== false) { messages.push("trabajar 💼"); shouldSend = true; }
@@ -235,32 +234,21 @@ const token = process.env.DISCORD_TOKEN;
 
 if (!token) {
     console.error("\n❌❌❌ ERROR FATAL ❌❌❌");
-    console.error("No se encontró la variable DISCORD_TOKEN.");
-    console.error("Asegúrate de haberla puesto en la pestaña 'Environment' de Render.");
-    console.error("Debe llamarse exactamente: DISCORD_TOKEN");
+    console.error("No se encontró la variable DISCORD_TOKEN en el entorno.");
+    console.error("Asegúrate de agregarla en la pestaña 'Environment' de Render.");
 } else {
-    console.log(`✅ Token detectado (${token.length} caracteres). Intentando conectar a Discord...`);
-    // 🔍 CHISMOSO ACTIVADO
-client.on("debug", (e) => console.log(e));
+    // ⚠️ Ya NO imprimimos el token aquí para evitar que Discord lo bloquee.
+    console.log(`✅ Token variable detectada. Iniciando conexión...`);
     
     client.login(token)
         .then(() => {
-            console.log("🎉 ¡LOGIN EXITOSO! William debería estar online."); 
+            console.log("🎉 ¡LOGIN EXITOSO! William está online."); 
         })
         .catch((error) => {
             console.error("\n💀💀💀 ERROR CRÍTICO AL CONECTAR 💀💀💀");
-            console.error("Esto es lo que dice Discord:");
-            console.error(`Tipo: ${error.name}`);
-            console.error(`Mensaje: ${error.message}`);
-            
-            if (error.code === 'TokenInvalid') {
-                console.error("👉 EL TOKEN ES INCORRECTO. Copiaste mal la contraseña del bot.");
-            } else if (error.code === 'DisallowedIntents') {
-                console.error("👉 FALTAN PERMISOS (INTENTS). Ve al Developer Portal y activa los 3 interruptores.");
-            } else {
-                console.error("👉 Error de red o bloqueo de IP.");
-            }
+            console.error(error);
+            console.error("------------------------------------------------");
+            console.error("SI VES 'TokenInvalid': Ve al Developer Portal -> Bot -> Reset Token y pon el nuevo en Render.");
             console.error("------------------------------------------------\n");
         });
 }
-
