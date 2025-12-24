@@ -6,8 +6,9 @@ require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 
 // ==========================================
-// 🌐 SERVIDOR WEB
+// 🌐 SERVIDOR WEB (ESTO ARREGLA LO DE RENDER)
 // ==========================================
+// Este pequeño servidor engaña a Render para que sepa que el bot está vivo.
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('William Bot is online!');
@@ -19,6 +20,10 @@ server.listen(PORT, () => {
 }).on('error', (err) => {
     console.error('❌ Server error:', err);
 });
+
+// ==========================================
+// CONFIGURACIÓN DEL BOT
+// ==========================================
 
 // Conexión Supabase
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
@@ -111,35 +116,29 @@ setInterval(async () => {
     try {
         const now = Date.now();
         
-        // 1. Buscamos a cualquiera que tenga algo pendiente (notified = false)
-        // Ya no filtramos por 'reminders_enabled' global, lo hacemos individualmente abajo.
+        // Buscamos usuarios con notificaciones pendientes
         const { data: users, error } = await supabase
             .from('users')
             .select('*')
             .or('work_notified.eq.false,daily_notified.eq.false,weekly_notified.eq.false,photocard_notified.eq.false,alpha_notified.eq.false,licuadora_notified.eq.false')
-            .limit(30); // Aumentamos un poco el límite para procesar mejor
+            .limit(30);
 
         if (error || !users || users.length === 0) return;
 
         for (const user of users) {
-            // Si no hay canal, saltamos
+            // Si no hay canal guardado, saltamos
             if (!user.last_channel_id) continue;
 
             let updates = {};
             let messages = [];
-            let shouldSend = false; // Bandera para saber si enviar mensaje o solo actualizar silencioso
+            let shouldSend = false;
 
-            // --- FUNCIÓN AUXILIAR PARA CHEQUEAR ---
-            // Si ya pasó el tiempo:
-            // - Si el usuario quiere aviso (pref_X = true) -> Agregamos mensaje.
-            // - Si NO quiere aviso (pref_X = false) -> Solo marcamos como true en la DB (Silencio).
-            
             // WORK
             if (user.work_notified === false && now >= (user.last_work_claim || 0) + COOLDOWNS.WORK) {
-                updates.work_notified = true; // Siempre marcamos como "procesado"
-                if (user.pref_work !== false) { // Si es true o null (default), avisamos
-                     messages.push("trabajar 💼");
-                     shouldSend = true;
+                updates.work_notified = true;
+                if (user.pref_work !== false) {
+                      messages.push("trabajar 💼");
+                      shouldSend = true;
                 }
             }
 
@@ -179,20 +178,18 @@ setInterval(async () => {
                 }
             }
 
-            // LICUADORA
+            // LICUADORA (✅ CORREGIDO)
             if (user.licuadora_notified === false && now >= (user.licuadora_reset_time || 0)) {
                 updates.licuadora_notified = true;
-                if (user.licuadora_notified !== false) { // Pequeño typo fix: pref_licuadora
-                     if (user.pref_licuadora !== false) {
-                        messages.push("usar la Licuadora 🌪️");
-                        shouldSend = true;
-                     }
+                // Verificación simple y correcta:
+                if (user.pref_licuadora !== false) {
+                     messages.push("usar la Licuadora 🌪️");
+                     shouldSend = true;
                 }
             }
 
-            // 3. EJECUTAR ACCIONES
+            // EJECUTAR ACCIONES
             if (Object.keys(updates).length > 0) {
-                // Solo enviamos mensaje si hay algo que el usuario QUIERE saber (shouldSend = true)
                 if (shouldSend && messages.length > 0) {
                     const channel = await client.channels.fetch(user.last_channel_id).catch(() => null);
                     if (channel) {
@@ -200,7 +197,6 @@ setInterval(async () => {
                     }
                 }
                 
-                // SIEMPRE actualizamos la DB para que no se quede "trabado" el usuario
                 await supabase.from('users').update(updates).eq('user_id', user.user_id);
             }
         }
