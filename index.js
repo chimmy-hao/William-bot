@@ -8,7 +8,6 @@ const { createClient } = require('@supabase/supabase-js');
 // ==========================================
 // 🌐 SERVIDOR WEB (ESTO ARREGLA LO DE RENDER)
 // ==========================================
-// Este pequeño servidor engaña a Render para que sepa que el bot está vivo.
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('William Bot is online!');
@@ -25,8 +24,16 @@ server.listen(PORT, () => {
 // CONFIGURACIÓN DEL BOT
 // ==========================================
 
-// Conexión Supabase
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+// Conexión Supabase (Manejo de error si faltan claves)
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_ANON_KEY;
+let supabase;
+
+if (supabaseUrl && supabaseKey) {
+    supabase = createClient(supabaseUrl, supabaseKey);
+} else {
+    console.error("⚠️ ADVERTENCIA: Faltan credenciales de SUPABASE en el .env");
+}
 
 // Limpieza de temporales
 const tempDir = path.join(__dirname, 'temp');
@@ -103,7 +110,7 @@ async function deployCommands() {
 }
 
 // ==========================================
-// ⏰ NOTIFICACIONES INTELIGENTES (GRANULARES)
+// ⏰ NOTIFICACIONES INTELIGENTES
 // ==========================================
 const COOLDOWNS = {
     WORK: 3 * 60 * 1000,
@@ -114,9 +121,9 @@ const COOLDOWNS = {
 
 setInterval(async () => {
     try {
+        if (!supabase) return; // Si no hay supabase, no hacemos nada
         const now = Date.now();
         
-        // Buscamos usuarios con notificaciones pendientes
         const { data: users, error } = await supabase
             .from('users')
             .select('*')
@@ -126,69 +133,38 @@ setInterval(async () => {
         if (error || !users || users.length === 0) return;
 
         for (const user of users) {
-            // Si no hay canal guardado, saltamos
             if (!user.last_channel_id) continue;
 
             let updates = {};
             let messages = [];
             let shouldSend = false;
 
-            // WORK
+            // Lógica de notificaciones (Work, Photocard, etc...)
             if (user.work_notified === false && now >= (user.last_work_claim || 0) + COOLDOWNS.WORK) {
                 updates.work_notified = true;
-                if (user.pref_work !== false) {
-                      messages.push("trabajar 💼");
-                      shouldSend = true;
-                }
+                if (user.pref_work !== false) { messages.push("trabajar 💼"); shouldSend = true; }
             }
-
-            // PHOTOCARD
             if (user.photocard_notified === false && now >= (user.last_photocard_claim || 0) + COOLDOWNS.PHOTOCARD) {
                 updates.photocard_notified = true;
-                if (user.pref_photocard !== false) {
-                    messages.push("buscar cartas 🎰");
-                    shouldSend = true;
-                }
+                if (user.pref_photocard !== false) { messages.push("buscar cartas 🎰"); shouldSend = true; }
             }
-
-            // DAILY
             if (user.daily_notified === false && now >= (user.last_daily_claim || 0) + COOLDOWNS.DAILY) {
                 updates.daily_notified = true;
-                if (user.pref_daily !== false) {
-                    messages.push("reclamar daily 📅");
-                    shouldSend = true;
-                }
+                if (user.pref_daily !== false) { messages.push("reclamar daily 📅"); shouldSend = true; }
             }
-
-            // WEEKLY
             if (user.weekly_notified === false && now >= (user.last_weekly_claim || 0) + COOLDOWNS.WEEKLY) {
                 updates.weekly_notified = true;
-                if (user.pref_weekly !== false) {
-                    messages.push("reclamar pack semanal 🗓️");
-                    shouldSend = true;
-                }
+                if (user.pref_weekly !== false) { messages.push("reclamar pack semanal 🗓️"); shouldSend = true; }
             }
-
-            // ALPHA
             if (user.alpha_notified === false && now >= (user.alpha_reset_time || 0)) {
                 updates.alpha_notified = true;
-                if (user.pref_alpha !== false) {
-                    messages.push("intentar Proyecto Alpha 🐺");
-                    shouldSend = true;
-                }
+                if (user.pref_alpha !== false) { messages.push("intentar Proyecto Alpha 🐺"); shouldSend = true; }
             }
-
-            // LICUADORA (✅ CORREGIDO)
             if (user.licuadora_notified === false && now >= (user.licuadora_reset_time || 0)) {
                 updates.licuadora_notified = true;
-                // Verificación simple y correcta:
-                if (user.pref_licuadora !== false) {
-                     messages.push("usar la Licuadora 🌪️");
-                     shouldSend = true;
-                }
+                if (user.pref_licuadora !== false) { messages.push("usar la Licuadora 🌪️"); shouldSend = true; }
             }
 
-            // EJECUTAR ACCIONES
             if (Object.keys(updates).length > 0) {
                 if (shouldSend && messages.length > 0) {
                     const channel = await client.channels.fetch(user.last_channel_id).catch(() => null);
@@ -196,7 +172,6 @@ setInterval(async () => {
                         await channel.send(`Hey <@${user.user_id}>, William ya está listo para **${messages.join(' y para ')}**!`).catch(() => {});
                     }
                 }
-                
                 await supabase.from('users').update(updates).eq('user_id', user.user_id);
             }
         }
@@ -204,7 +179,6 @@ setInterval(async () => {
         console.error("Error notificaciones:", e);
     }
 }, 60000); 
-
 
 // Evento Ready
 client.once(Events.ClientReady, async readyClient => {
@@ -221,25 +195,21 @@ client.on(Events.InteractionCreate, async interaction => {
         const command = client.commands.get(interaction.commandName);
 
         if (interaction.isAutocomplete()) {
-            if (command && command.autocomplete) {
-                await command.autocomplete(interaction, supabase);
-            }
+            if (command && command.autocomplete) await command.autocomplete(interaction, supabase);
             return;
         }
 
         if (!interaction.isChatInputCommand()) return;
 
-        // Memoria de Canal (Upsert seguro)
-        if (interaction.channelId) {
+        if (interaction.channelId && supabase) {
             const { error } = await supabase.from('users').upsert({
                 user_id: interaction.user.id,
                 last_channel_id: interaction.channelId
             }, { onConflict: 'user_id' });
-            if (error) console.log("Nota: No se pudo actualizar canal (sin impacto).");
+            if (error) console.log("Nota: No se pudo actualizar canal.");
         }
         
         if (!command) return;
-
         await command.execute(interaction, supabase);
 
     } catch (error) {
@@ -253,5 +223,41 @@ client.on(Events.InteractionCreate, async interaction => {
 process.on('uncaughtException', console.error);
 process.on('unhandledRejection', console.error);
 
+
+// ==========================================
+// 🚨 ZONA DE DIAGNÓSTICO Y ARRANQUE 🚨
+// ==========================================
+
+console.log("🔍 DIAGNÓSTICO DE ARRANQUE INICIADO...");
 loadCommands();
-client.login(process.env.DISCORD_TOKEN);
+
+const token = process.env.DISCORD_TOKEN;
+
+if (!token) {
+    console.error("\n❌❌❌ ERROR FATAL ❌❌❌");
+    console.error("No se encontró la variable DISCORD_TOKEN.");
+    console.error("Asegúrate de haberla puesto en la pestaña 'Environment' de Render.");
+    console.error("Debe llamarse exactamente: DISCORD_TOKEN");
+} else {
+    console.log(`✅ Token detectado (${token.length} caracteres). Intentando conectar a Discord...`);
+    
+    client.login(token)
+        .then(() => {
+            console.log("🎉 ¡LOGIN EXITOSO! William debería estar online."); 
+        })
+        .catch((error) => {
+            console.error("\n💀💀💀 ERROR CRÍTICO AL CONECTAR 💀💀💀");
+            console.error("Esto es lo que dice Discord:");
+            console.error(`Tipo: ${error.name}`);
+            console.error(`Mensaje: ${error.message}`);
+            
+            if (error.code === 'TokenInvalid') {
+                console.error("👉 EL TOKEN ES INCORRECTO. Copiaste mal la contraseña del bot.");
+            } else if (error.code === 'DisallowedIntents') {
+                console.error("👉 FALTAN PERMISOS (INTENTS). Ve al Developer Portal y activa los 3 interruptores.");
+            } else {
+                console.error("👉 Error de red o bloqueo de IP.");
+            }
+            console.error("------------------------------------------------\n");
+        });
+}
