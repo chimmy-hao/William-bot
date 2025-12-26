@@ -66,14 +66,15 @@ module.exports = {
     try {
       await interaction.deferReply();
 
-      // 2. BUSCAR PREMIO
+      // 2. BUSCAR PREMIO (SOLO ACTIVAS)
       const { data: rareCards, error: cardError } = await supabase
         .from('base_cards')
         .select('*')
-        .eq('rarity_level', REWARD_RARITY);
+        .eq('rarity_level', REWARD_RARITY)
+        .eq('is_active', true); // <--- ÚNICO CAMBIO: Filtro para ignorar cartas del pool
 
       if (cardError || !rareCards || rareCards.length === 0) {
-        return interaction.editReply('❌ Error: No hay cartas de rareza 2 disponibles.');
+        return interaction.editReply('❌ Error: No hay cartas de rareza 2 disponibles o activas.');
       }
 
       const randomCard = rareCards[Math.floor(Math.random() * rareCards.length)];
