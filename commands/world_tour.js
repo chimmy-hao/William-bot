@@ -33,7 +33,7 @@ const LOCATIONS = [
 
 // GIFs de LYKN (Lista solicitada)
 const LYKN_GIFS = [
-    'https://media.tenor.com/2LpVedAVi88AAAAM/williamjkp-lykn-william.gif',
+    'https://media1.tenor.com/m/SkKGg1qaV7MAAAAd/lykn-williamjkp.gif',
 ];
 
 module.exports = {
