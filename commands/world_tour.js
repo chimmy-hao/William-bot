@@ -33,7 +33,13 @@ const LOCATIONS = [
 
 // GIFs de LYKN (Lista solicitada)
 const LYKN_GIFS = [
-    'https://media1.tenor.com/m/SkKGg1qaV7MAAAAd/lykn-williamjkp.gif',
+    'https://media1.tenor.com/m/SkKGg1qaV7MAAAAd/lykn-williamjkp.gif'
+    'https://media.tenor.com/xl_1CD3dV-cAAAAM/hong-lykn-hongshihoshi.gif'
+    'https://media.tenor.com/gdphLsvsgTkAAAAM/hongshihoshi-lykn.gif'
+    'https://media.tenor.com/rFzBqacNSK4AAAAM/queercloud-nnutdan.gif'
+    'https://media.tenor.com/34zCyrMcaXUAAAAM/tuihong-hongshihoshi.gif'
+    'https://media.tenor.com/0aDSOgaoxNMAAAAM/lyknzip-lykn.gif'
+    'https://media.tenor.com/Vp_AS6zYhOEAAAAM/lykn-lyknzip.gif'
 ];
 
 module.exports = {
