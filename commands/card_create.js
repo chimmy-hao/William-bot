@@ -39,6 +39,12 @@ module.exports = {
     )
     .addAttachmentOption(opt =>
       opt.setName('image3').setDescription('Third image (rareza 3)').setRequired(true)
+    )
+    // --- AGREGADO: Opción para el Pool ---
+    .addBooleanOption(opt => 
+      opt.setName('en_espera')
+      .setDescription('True = Guardar en Pool (Oculta). False/Vacío = Publicar YA.')
+      .setRequired(false)
     ),
 
   async execute(interaction) {
@@ -58,6 +64,11 @@ module.exports = {
       const img1 = interaction.options.getAttachment('image1');
       const img2 = interaction.options.getAttachment('image2');
       const img3 = interaction.options.getAttachment('image3');
+      
+      // --- AGREGADO: Lógica del Pool ---
+      // Si pone True, va al pool (is_active = false). Si no pone nada, es visible (is_active = true).
+      const sendToPool = interaction.options.getBoolean('en_espera') || false;
+      const isActive = !sendToPool;
 
       // Verificar usuario en DB
       await supabase.from('users').upsert([
@@ -74,18 +85,18 @@ module.exports = {
 
       // Insertar cartas en DB (usar insert, no upsert)
       // SOLO el card_code base, sin secuencia
-      // MODIFICACIÓN AQUÍ: Se eliminó la concatenación del grupo en "name"
+      // --- AGREGADO: Se añadió la propiedad "is_active" a cada objeto ---
       const cards = [
-        { card_code: `${baseId}1`, name: idol, group_name: group, image_url: up1.secure_url, rarity: 'common', rarity_level: 1, era },
-        { card_code: `${baseId}2`, name: idol, group_name: group, image_url: up2.secure_url, rarity: 'rare', rarity_level: 2, era },
-        { card_code: `${baseId}3`, name: idol, group_name: group, image_url: up3.secure_url, rarity: 'legendary', rarity_level: 3, era }
+        { card_code: `${baseId}1`, name: idol, group_name: group, image_url: up1.secure_url, rarity: 'common', rarity_level: 1, era, is_active: isActive },
+        { card_code: `${baseId}2`, name: idol, group_name: group, image_url: up2.secure_url, rarity: 'rare', rarity_level: 2, era, is_active: isActive },
+        { card_code: `${baseId}3`, name: idol, group_name: group, image_url: up3.secure_url, rarity: 'legendary', rarity_level: 3, era, is_active: isActive }
       ];
 
       const { error } = await supabase.from('base_cards').insert(cards);
       if (error) throw new Error(error.message);
 
       // Crear anuncio con emojis según rareza y código base
-      // NOTA: Aquí dejé el formato visual completo para el anuncio de Discord, que se ve mejor así.
+      // Se mantiene el formato visual completo.
       const embed = new EmbedBuilder()
         .setColor('#2c2d31')
         .setTitle('✨ New photocards have been added!')
@@ -97,7 +108,7 @@ module.exports = {
         )
         .setFooter({ text: `added by: ${interaction.user.username}` });
 
-      // Enviar al canal de anuncios con try/catch
+      // Enviar al canal de anuncios con try/catch (Se envía SIEMPRE, aunque esté en pool)
       try {
         const channel = await interaction.client.channels.fetch('1411784592192573601');
         if (!channel) throw new Error('Canal no encontrado o sin permisos');
@@ -106,7 +117,13 @@ module.exports = {
         console.error('Error enviando anuncio:', channelError.message);
       }
 
-      await interaction.editReply('✅ Photocards added and announced!');
+      // --- AGREGADO: Mensaje de confirmación dinámico ---
+      if (sendToPool) {
+        await interaction.editReply('🔒 **Guardado en Pool (Oculto).** El anuncio fue enviado, pero las cartas no saldrán hasta usar `/release_all`.');
+      } else {
+        await interaction.editReply('✅ Photocards added and announced!');
+      }
+
     } catch (err) {
       console.error('Error en card_create:', err);
       await interaction.editReply(`❌ An error occurred while adding the photocards: ${err.message}`);
