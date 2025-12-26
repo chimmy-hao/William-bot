@@ -8,7 +8,6 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANO
 const ALLOWED_ROLES = ['1413313501694263357', '1412852141197885464'];
 
 // MAPA DE CONFIGURACIÓN
-// Actualizado para incluir world_tour (reset de last_checkin)
 const COMMAND_DB_MAP = {
   'photocard':  { last_photocard_claim: 0, photocard_notified: false },
   'work':       { last_work_claim: 0, work_notified: false },
@@ -16,7 +15,7 @@ const COMMAND_DB_MAP = {
   'weekly':     { last_weekly_claim: 0, weekly_notified: false },
   'alpha':      { alpha_uses: 0, alpha_reset_time: 0, alpha_notified: false },      
   'licuadora':  { licuadora_uses: 0, licuadora_reset_time: 0, licuadora_notified: false },
-  'world_tour': { last_checkin: 0 } // Nuevo: Resetea el tiempo de espera del concierto
+  'world_tour': { last_checkin: 0 } 
 };
 
 module.exports = {
@@ -34,7 +33,7 @@ module.exports = {
           { name: '🗓️ Weekly', value: 'weekly' },
           { name: '🐺 Project Alpha', value: 'alpha' },
           { name: '🌪️ Licuadora', value: 'licuadora' },
-          { name: '🌍 World Tour', value: 'world_tour' } // Opción agregada
+          { name: '🌍 World Tour', value: 'world_tour' }
         )
     )
     .addUserOption(option =>
@@ -68,17 +67,37 @@ module.exports = {
       const commandName = interaction.options.getString('comando');
       const reason = interaction.options.getString('razon') || 'Sin razón especificada';
 
-      // 4. Obtener configuración
-      const updateData = COMMAND_DB_MAP[commandName];
+      // 4. Copiar configuración para poder modificarla
+      // Usamos Spread syntax (...) para crear una copia y no modificar la constante original
+      let updateData = { ...COMMAND_DB_MAP[commandName] };
 
       if (!updateData) {
         return interaction.editReply({ content: '❌ Error de configuración: El comando no está en la lista de reseteo.' });
       }
 
-      // 5. Actualizar Supabase
-      // DETALLE IMPORTANTE: World Tour usa su propia tabla 'world_tours', el resto usa 'users'.
-      const targetTable = commandName === 'world_tour' ? 'world_tours' : 'users';
+      // 5. LÓGICA ESPECIAL PARA WORLD TOUR
+      // Si queremos repetir el concierto, tenemos que restar 1 a la ciudad actual.
+      // Así, cuando use "next_concert" (que suma 1), volverá al mismo número.
+      let targetTable = 'users'; // Por defecto tabla users
 
+      if (commandName === 'world_tour') {
+          targetTable = 'world_tours';
+          
+          // Consultar en qué ciudad está el usuario ahora
+          const { data: tourData } = await supabase
+              .from('world_tours')
+              .select('current_city')
+              .eq('user_id', targetUser.id)
+              .single();
+
+          if (tourData) {
+              // Restamos 1, pero evitamos que baje de 0
+              const previousCity = Math.max(0, tourData.current_city - 1);
+              updateData.current_city = previousCity;
+          }
+      }
+
+      // 6. Actualizar Supabase
       const { error } = await supabase
         .from(targetTable)
         .update(updateData)
@@ -86,12 +105,17 @@ module.exports = {
 
       if (error) {
         console.error('Error Supabase:', error);
-        return interaction.editReply({ content: '❌ Ocurrió un error al intentar actualizar la base de datos (Posiblemente el usuario no ha iniciado el tour o no existe).' });
+        return interaction.editReply({ content: '❌ Ocurrió un error al intentar actualizar la base de datos.' });
       }
 
-      // 6. Confirmación
+      // 7. Confirmación
+      let extraInfo = '';
+      if (commandName === 'world_tour') {
+          extraInfo = '\n🔙 **Nota:** Se ha retrocedido el contador para repetir el concierto.';
+      }
+
       return interaction.editReply({
-        content: `✅ **Cooldown Reseteado Correctamente**\n\n👤 **Usuario:** ${targetUser}\n⚙️ **Comando:** \`/${commandName}\`\n📝 **Razón:** ${reason}`
+        content: `✅ **Cooldown Reseteado Correctamente**\n\n👤 **Usuario:** ${targetUser}\n⚙️ **Comando:** \`/${commandName}\`\n📝 **Razón:** ${reason}${extraInfo}`
       });
 
     } catch (error) {
