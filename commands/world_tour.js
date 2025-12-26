@@ -31,15 +31,15 @@ const LOCATIONS = [
     { city: 'Mexico City', country: 'Mexico 🇲🇽' }
 ];
 
-// GIFs de LYKN (Lista solicitada)
+// GIFs de LYKN
 const LYKN_GIFS = [
-    'https://media1.tenor.com/m/SkKGg1qaV7MAAAAd/lykn-williamjkp.gif'
-    'https://media.tenor.com/xl_1CD3dV-cAAAAM/hong-lykn-hongshihoshi.gif'
-    'https://media.tenor.com/gdphLsvsgTkAAAAM/hongshihoshi-lykn.gif'
-    'https://media.tenor.com/rFzBqacNSK4AAAAM/queercloud-nnutdan.gif'
-    'https://media.tenor.com/34zCyrMcaXUAAAAM/tuihong-hongshihoshi.gif'
-    'https://media.tenor.com/0aDSOgaoxNMAAAAM/lyknzip-lykn.gif'
-    'https://media.tenor.com/Vp_AS6zYhOEAAAAM/lykn-lyknzip.gif'
+    'https://media.tenor.com/2LpVedAVi88AAAAM/williamjkp-lykn-william.gif',
+    'https://tenor.com/view/lykn-%E0%B8%99%E0%B8%B1%E0%B8%97%E0%B8%95%E0%B8%B8%E0%B9%89%E0%B8%A2-tuichayatorn-nnutdan-gif-4235254947263477878',
+    'https://tenor.com/view/lykn-lyknzip-gif-5931127331585961382',
+    'https://tenor.com/view/williamjkp-lykn-tuilover-gif-8359119697233279986',
+    'https://tenor.com/view/lykn-lyknzip-gif-6241919039813747937',
+    'https://tenor.com/view/queercloud-nnutdan-williamjkp-lykn-gif-12420014806777284782',
+    'https://tenor.com/view/william-lykn-thamepo-gif-575740922252119068'
 ];
 
 module.exports = {
@@ -61,7 +61,7 @@ module.exports = {
       // 1. Obtener datos básicos usuario
       const { data: user, error: userError } = await supabase.from('users').select('*').eq('user_id', userId).single();
       if (userError || !user) {
-          // Si no existe, lo creamos rápido para que no de error
+          // Si no existe, lo creamos rápido
           await supabase.from('users').insert({ user_id: userId, username: interaction.user.username });
           return interaction.editReply('❌ Creando perfil... Intenta de nuevo en unos segundos.');
       }
@@ -156,8 +156,6 @@ module.exports = {
           if (!tour || tour.current_city < TOTAL_CONCERTS) {
               return interaction.editReply(`❌ Aún no terminas la gira. Vas por el concierto **${tour ? tour.current_city : 0}/${TOTAL_CONCERTS}**.`);
           }
-
-          // Sin cooldown. Si ya llegó a 10, cobra.
 
           // Recompensas Finales
           const finalCoins = 3000;
