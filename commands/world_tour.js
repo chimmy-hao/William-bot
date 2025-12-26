@@ -34,12 +34,6 @@ const LOCATIONS = [
 // GIFs de LYKN (Lista solicitada)
 const LYKN_GIFS = [
     'https://media.tenor.com/2LpVedAVi88AAAAM/williamjkp-lykn-william.gif',
-    'https://tenor.com/view/lykn-%E0%B8%99%E0%B8%B1%E0%B8%97%E0%B8%95%E0%B8%B8%E0%B9%89%E0%B8%A2-tuichayatorn-nnutdan-gif-4235254947263477878',
-    'https://tenor.com/view/lykn-lyknzip-gif-5931127331585961382',
-    'https://tenor.com/view/williamjkp-lykn-tuilover-gif-8359119697233279986',
-    'https://tenor.com/view/lykn-lyknzip-gif-6241919039813747937',
-    'https://tenor.com/view/queercloud-nnutdan-williamjkp-lykn-gif-12420014806777284782',
-    'https://tenor.com/view/william-lykn-thamepo-gif-575740922252119068'
 ];
 
 module.exports = {
