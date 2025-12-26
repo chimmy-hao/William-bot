@@ -1,73 +1,104 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
+const cloudinary = require('cloudinary').v2;
 
 // Config Supabase
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
+// Config Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+const strawberryEmoji = '<:strawberrity:1411384728119939182>';
+
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName('release_all')
-    .setDescription('ADMIN: Activa todas las cartas ocultas en el Pool y avisa a los usuarios.'),
+    .setName('card_create')
+    .setDescription('Managers: añade cartas nuevas.')
+    .addStringOption(opt => opt.setName('id').setDescription('Base ID (e.g. WMO)').setRequired(true))
+    .addStringOption(opt => opt.setName('group').setDescription('Group name').setRequired(true))
+    .addStringOption(opt => opt.setName('idol').setDescription('Idol name').setRequired(true))
+    .addStringOption(opt => opt.setName('era').setDescription('Album / Era').setRequired(true))
+    .addAttachmentOption(opt => opt.setName('image1').setDescription('Common Image').setRequired(true))
+    .addAttachmentOption(opt => opt.setName('image2').setDescription('Rare Image').setRequired(true))
+    .addAttachmentOption(opt => opt.setName('image3').setDescription('Legendary Image').setRequired(true))
+    // OPCIÓN: Interruptor para el Pool
+    .addBooleanOption(opt => 
+      opt.setName('en_espera')
+      .setDescription('True = Guardar en Pool (Oculta). False/Vacío = Publicar YA.')
+      .setRequired(false)
+    ),
 
   async execute(interaction) {
     try {
       await interaction.deferReply({ ephemeral: true });
 
-      // 1. Verificar Permisos (SOLO EL ROL ESPECÍFICO)
-      const allowedRoles = ['1412852141197885464']; 
+      // Verificar Roles
+      const allowedRoles = ['1411356087977906317', '1411356161063518228'];
+      if (!allowedRoles.some(r => interaction.member.roles.cache.has(r))) {
+        return interaction.editReply('❌ No tienes permisos.');
+      }
+
+      const baseId = interaction.options.getString('id').toUpperCase();
+      const group = interaction.options.getString('group');
+      const idol = interaction.options.getString('idol');
+      const era = interaction.options.getString('era');
       
-      const memberRoles = interaction.member.roles.cache;
-      const hasRole = allowedRoles.some(roleId => memberRoles.has(roleId));
+      // LÓGICA DEL INTERRUPTOR
+      // Si el usuario no pone nada, es false (Publicar YA).
+      // Si pone True, se va al pool (is_active = false).
+      const sendToPool = interaction.options.getBoolean('en_espera') || false;
+      const isActive = !sendToPool; 
 
-      if (!hasRole) {
-        return interaction.editReply('❌ No tienes permisos para usar este comando.');
-      }
+      // Verificar usuario
+      await supabase.from('users').upsert([{ user_id: interaction.user.id }], { onConflict: 'user_id' });
 
-      // 2. Contar cuántas cartas hay ocultas
-      const { count } = await supabase
-        .from('base_cards')
-        .select('*', { count: 'exact', head: true })
-        .eq('is_active', false);
+      // Cloudinary
+      const uploadWebp = async (url, pid) => cloudinary.uploader.upload(url, { folder: 'photocards', public_id: pid, format: 'webp', overwrite: true });
+      const up1 = await uploadWebp(interaction.options.getAttachment('image1').url, `${baseId}1`);
+      const up2 = await uploadWebp(interaction.options.getAttachment('image2').url, `${baseId}2`);
+      const up3 = await uploadWebp(interaction.options.getAttachment('image3').url, `${baseId}3`);
 
-      if (count === 0) {
-        return interaction.editReply('🤷‍♂️ No hay cartas ocultas en el Pool. Todo lo que subiste ya es público.');
-      }
+      // Insertar en DB con el estado is_active correcto
+      const cards = [
+        { card_code: `${baseId}1`, name: idol, group_name: group, image_url: up1.secure_url, rarity: 'common', rarity_level: 1, era, is_active: isActive },
+        { card_code: `${baseId}2`, name: idol, group_name: group, image_url: up2.secure_url, rarity: 'rare', rarity_level: 2, era, is_active: isActive },
+        { card_code: `${baseId}3`, name: idol, group_name: group, image_url: up3.secure_url, rarity: 'legendary', rarity_level: 3, era, is_active: isActive }
+      ];
 
-      // 3. ACTIVAR TODO (El gran botón rojo)
-      const { error } = await supabase
-        .from('base_cards')
-        .update({ is_active: true })
-        .eq('is_active', false);
-
+      const { error } = await supabase.from('base_cards').insert(cards);
       if (error) throw new Error(error.message);
 
-      // 4. Anuncio público en el canal de noticias (SIN PING)
+      // --- ANUNCIO PÚBLICO (SE ENVÍA SIEMPRE) ---
       const embed = new EmbedBuilder()
-        .setColor('#00FF00') // Verde brillante
-        .setTitle('🚀 ¡Las eras ya están acá!')
+        .setColor('#2c2d31')
+        .setTitle('✨ New photocards have been added!')
         .setDescription(
-          `🎉 **¡Atención coleccionistas!**\n\n` +
-          `Se han activado **${count}activado **${count}** nuevas cartas para coleccionar.\n` +
-          `Todas las eras anunciadas previamente **ya se pueden conseguir** en drops y sobres.\n\n` +
-          `¡Mucha suerte! 🍀`
+          `**${idol} — ${group}**\nEra: ${era}\n\n` +
+          `${strawberryEmoji} | ${baseId}1\n` +
+          `${strawberryEmoji}${strawberryEmoji} | ${baseId}2\n` +
+          `${strawberryEmoji}${strawberryEmoji}${strawberryEmoji} | ${baseId}3\n`
         )
-        .setTimestamp();
+        .setFooter({ text: `added by: ${interaction.user.username}` });
 
       try {
-        // ID de tu canal de anuncios
         const channel = await interaction.client.channels.fetch('1411784592192573601');
-        // MODIFICADO: Se eliminó "content: '@everyone'"
         if (channel) await channel.send({ embeds: [embed] });
-      } catch (channelError) {
-        console.error('Error enviando anuncio:', channelError.message);
+      } catch (e) { console.error('Error enviando anuncio:', e); }
+
+      // --- RESPUESTA FINAL AL MANAGER ---
+      if (sendToPool) {
+        await interaction.editReply(`🔒 **Anunciada y Guardada en Pool (Oculta).**\nEl anuncio se envió, pero la carta no saldrá en sobres hasta que uses \`/release_all\`.`);
+      } else {
+        await interaction.editReply('✅ **Publicada (Visible) y Anunciada.**\nLa carta ya se puede conseguir en sobres.');
       }
 
-      // 5. Confirmación privada para ti
-      await interaction.editReply(`✅ **¡Hecho!** Se han activado ${count} cartas correctamente y se envió el aviso.`);
-
     } catch (err) {
-      console.error('Error en release_all:', err);
-      await interaction.editReply(`❌ Ocurrió un error al liberar las cartas: ${err.message}`);
+      console.error(err);
+      await interaction.editReply(`❌ Error: ${err.message}`);
     }
   },
 };
