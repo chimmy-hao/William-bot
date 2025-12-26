@@ -15,6 +15,7 @@ module.exports = {
           { name: '🎰 Photocard', value: 'pref_photocard' },
           { name: '🐺 Alpha', value: 'pref_alpha' },
           { name: '🌪️ Licuadora', value: 'pref_licuadora' },
+          { name: '🌍 World Tour', value: 'pref_world_tour' }, // <--- AGREGADO
           { name: '🎚️ TODO (Activar/Desactivar todo)', value: 'all' }
         )
     )
@@ -28,7 +29,7 @@ module.exports = {
         )
     ),
 
-  async execute(interaction, supabase) {
+  async execute(interaction, supabase) { // Asumo que pasas supabase como argumento o lo requieres dentro
     const userId = interaction.user.id;
     const type = interaction.options.getString('tipo');
     const newState = interaction.options.getString('estado') === 'true';
@@ -47,7 +48,8 @@ module.exports = {
             pref_weekly: newState,
             pref_photocard: newState,
             pref_alpha: newState,
-            pref_licuadora: newState
+            pref_licuadora: newState,
+            pref_world_tour: newState // <--- AGREGADO
         };
         description = newState 
             ? '✅ Has activado **TODAS** las notificaciones.' 
@@ -56,12 +58,19 @@ module.exports = {
         // Si elige una específica
         updates[type] = newState;
         const nameMap = {
-            pref_work: 'Work', pref_daily: 'Daily', pref_weekly: 'Weekly',
-            pref_photocard: 'Photocard', pref_alpha: 'Alpha', pref_licuadora: 'Licuadora'
+            pref_work: 'Work', 
+            pref_daily: 'Daily', 
+            pref_weekly: 'Weekly',
+            pref_photocard: 'Photocard', 
+            pref_alpha: 'Alpha', 
+            pref_licuadora: 'Licuadora',
+            pref_world_tour: 'World Tour' // <--- AGREGADO
         };
+        
+        const friendlyName = nameMap[type] || type; // Fallback por seguridad
         description = newState 
-            ? `✅ Notificaciones de **${nameMap[type]}** activadas.` 
-            : `🔕 Notificaciones de **${nameMap[type]}** desactivadas.`;
+            ? `✅ Notificaciones de **${friendlyName}** activadas.` 
+            : `🔕 Notificaciones de **${friendlyName}** desactivadas.`;
       }
 
       // Guardar en Base de Datos
