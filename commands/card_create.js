@@ -1,132 +1,73 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
-const cloudinary = require('cloudinary').v2;
 
 // Config Supabase
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
-// Config Cloudinary
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-// Emoji personalizado
-const strawberryEmoji = '<:strawberrity:1411384728119939182>';
-
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName('card_create')
-    .setDescription('Managers: add new photocards (3 variants)')
-    .addStringOption(opt =>
-      opt.setName('id').setDescription('Base ID (e.g. WMO)').setRequired(true)
-    )
-    .addStringOption(opt =>
-      opt.setName('group').setDescription('Group name').setRequired(true)
-    )
-    .addStringOption(opt =>
-      opt.setName('idol').setDescription('Idol name').setRequired(true)
-    )
-    .addStringOption(opt =>
-      opt.setName('era').setDescription('Album / Era').setRequired(true)
-    )
-    .addAttachmentOption(opt =>
-      opt.setName('image1').setDescription('First image (rareza 1)').setRequired(true)
-    )
-    .addAttachmentOption(opt =>
-      opt.setName('image2').setDescription('Second image (rareza 2)').setRequired(true)
-    )
-    .addAttachmentOption(opt =>
-      opt.setName('image3').setDescription('Third image (rareza 3)').setRequired(true)
-    )
-    // --- AGREGADO: Opción para el Pool ---
-    .addBooleanOption(opt => 
-      opt.setName('en_espera')
-      .setDescription('True = Guardar en Pool (Oculta). False/Vacío = Publicar YA.')
-      .setRequired(false)
-    ),
+    .setName('release_all')
+    .setDescription('ADMIN: Activa todas las cartas ocultas en el Pool y avisa a los usuarios.'),
 
   async execute(interaction) {
     try {
       await interaction.deferReply({ ephemeral: true });
 
-      // Roles permitidos
-      const allowedRoles = ['1411356087977906317', '1411356161063518228'];
+      // 1. Verificar Permisos (SOLO EL ROL ESPECÍFICO)
+      const allowedRoles = ['1412852141197885464']; 
+      
       const memberRoles = interaction.member.roles.cache;
       const hasRole = allowedRoles.some(roleId => memberRoles.has(roleId));
-      if (!hasRole) return interaction.editReply('❌ No tienes permisos para usar este comando.');
 
-      const baseId = interaction.options.getString('id').toUpperCase();
-      const group = interaction.options.getString('group');
-      const idol = interaction.options.getString('idol');
-      const era = interaction.options.getString('era');
-      const img1 = interaction.options.getAttachment('image1');
-      const img2 = interaction.options.getAttachment('image2');
-      const img3 = interaction.options.getAttachment('image3');
-      
-      // --- AGREGADO: Lógica del Pool ---
-      // Si pone True, va al pool (is_active = false). Si no pone nada, es visible (is_active = true).
-      const sendToPool = interaction.options.getBoolean('en_espera') || false;
-      const isActive = !sendToPool;
+      if (!hasRole) {
+        return interaction.editReply('❌ No tienes permisos para usar este comando.');
+      }
 
-      // Verificar usuario en DB
-      await supabase.from('users').upsert([
-        { user_id: interaction.user.id, username: interaction.user.username }
-      ], { onConflict: 'user_id' });
+      // 2. Contar cuántas cartas hay ocultas
+      const { count } = await supabase
+        .from('base_cards')
+        .select('*', { count: 'exact', head: true })
+        .eq('is_active', false);
 
-      // Subir imágenes a Cloudinary
-      const uploadWebp = async (url, public_id) =>
-        cloudinary.uploader.upload(url, { folder: 'photocards', public_id, format: 'webp', overwrite: true });
+      if (count === 0) {
+        return interaction.editReply('🤷‍♂️ No hay cartas ocultas en el Pool. Todo lo que subiste ya es público.');
+      }
 
-      const up1 = await uploadWebp(img1.url, `${baseId}1`);
-      const up2 = await uploadWebp(img2.url, `${baseId}2`);
-      const up3 = await uploadWebp(img3.url, `${baseId}3`);
+      // 3. ACTIVAR TODO (El gran botón rojo)
+      const { error } = await supabase
+        .from('base_cards')
+        .update({ is_active: true })
+        .eq('is_active', false);
 
-      // Insertar cartas en DB (usar insert, no upsert)
-      // SOLO el card_code base, sin secuencia
-      // --- AGREGADO: Se añadió la propiedad "is_active" a cada objeto ---
-      const cards = [
-        { card_code: `${baseId}1`, name: idol, group_name: group, image_url: up1.secure_url, rarity: 'common', rarity_level: 1, era, is_active: isActive },
-        { card_code: `${baseId}2`, name: idol, group_name: group, image_url: up2.secure_url, rarity: 'rare', rarity_level: 2, era, is_active: isActive },
-        { card_code: `${baseId}3`, name: idol, group_name: group, image_url: up3.secure_url, rarity: 'legendary', rarity_level: 3, era, is_active: isActive }
-      ];
-
-      const { error } = await supabase.from('base_cards').insert(cards);
       if (error) throw new Error(error.message);
 
-      // Crear anuncio con emojis según rareza y código base
-      // Se mantiene el formato visual completo.
+      // 4. Anuncio público en el canal de noticias (SIN PING)
       const embed = new EmbedBuilder()
-        .setColor('#2c2d31')
-        .setTitle('✨ New photocards have been added!')
+        .setColor('#00FF00') // Verde brillante
+        .setTitle('🚀 ¡Las eras ya están acá!')
         .setDescription(
-          `**${idol} — ${group}**\nEra ${era}\n\n` +
-          `${strawberryEmoji} | ${baseId}1\n` +
-          `${strawberryEmoji}${strawberryEmoji} | ${baseId}2\n` +
-          `${strawberryEmoji}${strawberryEmoji}${strawberryEmoji} | ${baseId}3\n`
+          `🎉 **¡Atención coleccionistas!**\n\n` +
+          `Se han activado **${count}activado **${count}** nuevas cartas para coleccionar.\n` +
+          `Todas las eras anunciadas previamente **ya se pueden conseguir** en drops y sobres.\n\n` +
+          `¡Mucha suerte! 🍀`
         )
-        .setFooter({ text: `added by: ${interaction.user.username}` });
+        .setTimestamp();
 
-      // Enviar al canal de anuncios con try/catch (Se envía SIEMPRE, aunque esté en pool)
       try {
+        // ID de tu canal de anuncios
         const channel = await interaction.client.channels.fetch('1411784592192573601');
-        if (!channel) throw new Error('Canal no encontrado o sin permisos');
-        await channel.send({ embeds: [embed] });
+        // MODIFICADO: Se eliminó "content: '@everyone'"
+        if (channel) await channel.send({ embeds: [embed] });
       } catch (channelError) {
         console.error('Error enviando anuncio:', channelError.message);
       }
 
-      // --- AGREGADO: Mensaje de confirmación dinámico ---
-      if (sendToPool) {
-        await interaction.editReply('🔒 **Guardado en Pool (Oculto).** El anuncio fue enviado, pero las cartas no saldrán hasta usar `/release_all`.');
-      } else {
-        await interaction.editReply('✅ Photocards added and announced!');
-      }
+      // 5. Confirmación privada para ti
+      await interaction.editReply(`✅ **¡Hecho!** Se han activado ${count} cartas correctamente y se envió el aviso.`);
 
     } catch (err) {
-      console.error('Error en card_create:', err);
-      await interaction.editReply(`❌ An error occurred while adding the photocards: ${err.message}`);
+      console.error('Error en release_all:', err);
+      await interaction.editReply(`❌ Ocurrió un error al liberar las cartas: ${err.message}`);
     }
   },
 };
