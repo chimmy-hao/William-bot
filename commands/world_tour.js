@@ -31,15 +31,15 @@ const LOCATIONS = [
     { city: 'Mexico City', country: 'Mexico 🇲🇽' }
 ];
 
-// GIFs de LYKN
+// GIFs de LYKN (ACTUALIZADOS)
 const LYKN_GIFS = [
     'https://media.tenor.com/2LpVedAVi88AAAAM/williamjkp-lykn-william.gif',
-    'https://tenor.com/view/lykn-%E0%B8%99%E0%B8%B1%E0%B8%97%E0%B8%95%E0%B8%B8%E0%B9%89%E0%B8%A2-tuichayatorn-nnutdan-gif-4235254947263477878',
-    'https://tenor.com/view/lykn-lyknzip-gif-5931127331585961382',
-    'https://tenor.com/view/williamjkp-lykn-tuilover-gif-8359119697233279986',
-    'https://tenor.com/view/lykn-lyknzip-gif-6241919039813747937',
-    'https://tenor.com/view/queercloud-nnutdan-williamjkp-lykn-gif-12420014806777284782',
-    'https://tenor.com/view/william-lykn-thamepo-gif-575740922252119068'
+    'https://media1.tenor.com/m/Osal72ja-HYAAAAd/lykn-%E0%B8%99%E0%B8%B1%E0%B8%97%E0%B8%95%E0%B8%B8%E0%B9%89%E0%B8%A2.gif',
+    'https://media1.tenor.com/m/Uk-Y4jTKraYAAAAd/lykn-lyknzip.gif',
+    'https://media1.tenor.com/m/dAGPE3yPe_IAAAAd/williamjkp-lykn.gif',
+    'https://media1.tenor.com/m/Vp_AS6zYhOEAAAAd/lykn-lyknzip.gif',
+    'https://media1.tenor.com/m/rFzBqacNSK4AAAAd/queercloud-nnutdan.gif',
+    'https://media1.tenor.com/m/B_1xUYF-TBwAAAAd/william-lykn-thamepo.gif'
 ];
 
 module.exports = {
@@ -61,7 +61,6 @@ module.exports = {
       // 1. Obtener datos básicos usuario
       const { data: user, error: userError } = await supabase.from('users').select('*').eq('user_id', userId).single();
       if (userError || !user) {
-          // Si no existe, lo creamos rápido
           await supabase.from('users').insert({ user_id: userId, username: interaction.user.username });
           return interaction.editReply('❌ Creando perfil... Intenta de nuevo en unos segundos.');
       }
@@ -69,7 +68,6 @@ module.exports = {
       // 2. Obtener estado del tour
       let { data: tour } = await supabase.from('world_tours').select('*').eq('user_id', userId).single();
 
-      // Helpers visuales
       const getGif = () => LYKN_GIFS[Math.floor(Math.random() * LYKN_GIFS.length)];
       const getDest = () => LOCATIONS[Math.floor(Math.random() * LOCATIONS.length)];
 
@@ -81,14 +79,17 @@ module.exports = {
               return interaction.editReply(`⚠️ **Gira en curso:** Estás en el concierto **${tour.current_city}/${TOTAL_CONCERTS}**. Usa \`/world_tour next_concert\`.`);
           }
 
-          // Recompensa inicial (100-300 monedas)
           const pay = Math.floor(Math.random() * 201) + 100;
           const dest = getDest();
 
-          // Crear tour iniciando en 1
-          await supabase.from('world_tours').insert({ user_id: userId, current_city: 1, last_checkin: now });
+          // AQUI: Agregamos tour_notified: false
+          await supabase.from('world_tours').insert({ 
+              user_id: userId, 
+              current_city: 1, 
+              last_checkin: now,
+              tour_notified: false // <--- Notificación pendiente
+          });
           
-          // Dar dinero
           await supabase.from('users').update({ balance: (user.balance || 0) + pay }).eq('user_id', userId);
 
           const embed = new EmbedBuilder()
@@ -112,12 +113,10 @@ module.exports = {
       if (subcommand === 'next_concert') {
           if (!tour) return interaction.editReply('❌ No has iniciado la gira. Usa `/world_tour start`.');
           
-          // Si ya llegó a 10, lo mandamos al goodbye
           if (tour.current_city >= TOTAL_CONCERTS) {
               return interaction.editReply('🎉 **¡Gira Finalizada!** Ya diste los 10 conciertos. Usa `/world_tour goodbye` para despedirte y cobrar.');
           }
 
-          // Verificar Cooldown (15 min)
           const remaining = COOLDOWN_TIME - (now - tour.last_checkin);
           if (remaining > 0) {
               const minutes = Math.floor(remaining / 60000);
@@ -125,13 +124,17 @@ module.exports = {
               return interaction.editReply(`⏳ **Descansando en el hotel.**\nLYKN debe descansar. Próximo vuelo en **${minutes}m ${seconds}s**.`);
           }
 
-          // Avanzar contador
           const nextStep = tour.current_city + 1;
           const pay = Math.floor(Math.random() * 201) + 100;
           const dest = getDest();
 
-          // Actualizar DB
-          await supabase.from('world_tours').update({ current_city: nextStep, last_checkin: now }).eq('user_id', userId);
+          // AQUI: Agregamos tour_notified: false
+          await supabase.from('world_tours').update({ 
+              current_city: nextStep, 
+              last_checkin: now,
+              tour_notified: false // <--- Notificación pendiente
+          }).eq('user_id', userId);
+
           await supabase.from('users').update({ balance: (user.balance || 0) + pay }).eq('user_id', userId);
 
           const embed = new EmbedBuilder()
@@ -157,19 +160,15 @@ module.exports = {
               return interaction.editReply(`❌ Aún no terminas la gira. Vas por el concierto **${tour ? tour.current_city : 0}/${TOTAL_CONCERTS}**.`);
           }
 
-          // Recompensas Finales
           const finalCoins = 3000;
           const packs = [
               { id: 'banana', name: 'Banana Pack', emoji: bananaEmoji },
               { id: 'grape', name: 'Grape Pack', emoji: grapeEmoji }
           ];
 
-          // 1. Dar Dinero
           await supabase.from('users').update({ balance: (user.balance || 0) + finalCoins }).eq('user_id', userId);
 
-          // 2. Dar Packs (Inventario)
           for (const p of packs) {
-              // Buscar si ya tiene el pack
               const { data: inv } = await supabase
                 .from('user_inventory')
                 .select('quantity')
@@ -179,18 +178,17 @@ module.exports = {
               
               const qty = (inv?.quantity || 0) + 1;
               
-              // Upsert (Insertar o Actualizar)
               await supabase.from('user_inventory').upsert(
                 { user_id: userId, item_id: p.id, quantity: qty }, 
                 { onConflict: 'user_id, item_id' }
               );
           }
 
-          // 3. Borrar Tour (Reset para jugar de nuevo)
+          // Reset (borra el tour)
           await supabase.from('world_tours').delete().eq('user_id', userId);
 
           const embed = new EmbedBuilder()
-              .setColor('#FFD700') // Dorado
+              .setColor('#FFD700') 
               .setTitle('👋 LYKN World Tour: Goodbye Stage')
               .setDescription(
                   `¡Gracias a todos los fans! La gira mundial ha concluido con éxito.\n` +
