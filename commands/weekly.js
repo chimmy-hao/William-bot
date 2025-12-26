@@ -17,7 +17,8 @@ const weeklyGifs = [
     'https://media.tenor.com/SkKGg1qaV7MAAAAM/lykn-williamjkp.gif',
     'https://media.tenor.com/_dCnuDEYc7MAAAAM/lykn-william-lykn.gif',
     'https://media.tenor.com/fbX5_SKWKO4AAAAM/lyknzip-lykn.gif'
-];
+    'https://media.tenor.com/Nx318i7PY0QAAAAM/lykn-william-lykn.gif'
+    ];
 
 module.exports = {
   data: new SlashCommandBuilder()
