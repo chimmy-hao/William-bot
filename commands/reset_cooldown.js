@@ -8,15 +8,15 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANO
 const ALLOWED_ROLES = ['1413313501694263357', '1412852141197885464'];
 
 // MAPA DE CONFIGURACIÓN
-// Actualizado para resetear también el estado de notificación (_notified: false)
-// Así el sistema de reminders sabe que el usuario vuelve a estar "pendiente"
+// Actualizado para incluir world_tour (reset de last_checkin)
 const COMMAND_DB_MAP = {
-  'photocard': { last_photocard_claim: 0, photocard_notified: false },
-  'work':      { last_work_claim: 0, work_notified: false },
-  'daily':     { last_daily_claim: 0, daily_notified: false },
-  'weekly':    { last_weekly_claim: 0, weekly_notified: false },
-  'alpha':     { alpha_uses: 0, alpha_reset_time: 0, alpha_notified: false },      
-  'licuadora': { licuadora_uses: 0, licuadora_reset_time: 0, licuadora_notified: false } 
+  'photocard':  { last_photocard_claim: 0, photocard_notified: false },
+  'work':       { last_work_claim: 0, work_notified: false },
+  'daily':      { last_daily_claim: 0, daily_notified: false },
+  'weekly':     { last_weekly_claim: 0, weekly_notified: false },
+  'alpha':      { alpha_uses: 0, alpha_reset_time: 0, alpha_notified: false },      
+  'licuadora':  { licuadora_uses: 0, licuadora_reset_time: 0, licuadora_notified: false },
+  'world_tour': { last_checkin: 0 } // Nuevo: Resetea el tiempo de espera del concierto
 };
 
 module.exports = {
@@ -33,7 +33,8 @@ module.exports = {
           { name: '📅 Daily', value: 'daily' },
           { name: '🗓️ Weekly', value: 'weekly' },
           { name: '🐺 Project Alpha', value: 'alpha' },
-          { name: '🌪️ Licuadora', value: 'licuadora' }
+          { name: '🌪️ Licuadora', value: 'licuadora' },
+          { name: '🌍 World Tour', value: 'world_tour' } // Opción agregada
         )
     )
     .addUserOption(option =>
@@ -48,8 +49,7 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    // 1. AVISO INMEDIATO (Vital para evitar el crash de timeout)
-    // Esto le dice a Discord "Estoy procesando", dándote 15 minutos en vez de 3 segundos.
+    // 1. AVISO INMEDIATO
     await interaction.deferReply(); 
 
     try {
@@ -58,7 +58,6 @@ module.exports = {
       const hasPermission = ALLOWED_ROLES.some(roleId => memberRoles.has(roleId));
 
       if (!hasPermission) {
-        // Usamos editReply porque ya usamos deferReply arriba
         return interaction.editReply({ 
           content: '🚫 **Acceso Denegado:** No tienes permisos de administrador para usar este comando.'
         });
@@ -77,14 +76,17 @@ module.exports = {
       }
 
       // 5. Actualizar Supabase
+      // DETALLE IMPORTANTE: World Tour usa su propia tabla 'world_tours', el resto usa 'users'.
+      const targetTable = commandName === 'world_tour' ? 'world_tours' : 'users';
+
       const { error } = await supabase
-        .from('users')
+        .from(targetTable)
         .update(updateData)
         .eq('user_id', targetUser.id);
 
       if (error) {
         console.error('Error Supabase:', error);
-        return interaction.editReply({ content: '❌ Ocurrió un error al intentar actualizar la base de datos.' });
+        return interaction.editReply({ content: '❌ Ocurrió un error al intentar actualizar la base de datos (Posiblemente el usuario no ha iniciado el tour o no existe).' });
       }
 
       // 6. Confirmación
@@ -94,7 +96,6 @@ module.exports = {
 
     } catch (error) {
       console.error('Error en reset_cooldown:', error);
-      // Intentamos editar la respuesta si aún es posible
       return interaction.editReply({ content: '❌ Ocurrió un error interno al ejecutar el comando.' }).catch(() => {});
     }
   }
