@@ -2,7 +2,6 @@ const { SlashCommandBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 
 // Importar configuración de packs
-// Asegúrate de que la ruta sea correcta según tu estructura de carpetas
 const packConfigs = require('../packs'); 
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
@@ -65,7 +64,8 @@ module.exports = {
       const { data: groups } = await supabase
         .from('base_cards')
         .select('group_name')
-        .not('group_name', 'is', null);
+        .not('group_name', 'is', null)
+        .eq('is_active', true); // Solo grupos activos
 
       const uniqueGroups = [...new Set(groups.map(g => g.group_name))];
       const filtered = uniqueGroups.filter(g => g.toLowerCase().includes(focused.value.toLowerCase())).slice(0, 25);
@@ -73,8 +73,11 @@ module.exports = {
     }
 
     if (focused.name === 'idol') {
-      const { data: idols } = await supabase.from('base_cards').select('name');
-      // Limpiamos el nombre para que el usuario vea "Win Metawin" y no "Win Metawin — Solista"
+      const { data: idols } = await supabase
+        .from('base_cards')
+        .select('name')
+        .eq('is_active', true); // Solo idols activos
+      
       const uniqueIdols = [...new Set(idols.map(i => i.name.split(' — ')[0].trim()))];
       const filtered = uniqueIdols.filter(n => n.toLowerCase().includes(focused.value.toLowerCase())).slice(0, 25);
       return interaction.respond(filtered.map(n => ({ name: n, value: n })));
@@ -120,12 +123,11 @@ module.exports = {
         if (giveConfig === "random5") {
             for (let i = 0; i < 5; i++) {
                 const rarity = Math.floor(Math.random() * 3) + 1;
-                let query = supabase.from('base_cards').select('*').eq('rarity_level', rarity);
+                let query = supabase.from('base_cards').select('*')
+                    .eq('rarity_level', rarity)
+                    .eq('is_active', true); // <--- FILTRO AGREGADO
 
                 if (grupo) query = query.eq('group_name', grupo);
-                
-                // --- CORRECCIÓN AQUÍ ---
-                // Usamos ilike con % para que "Win Metawin" encuentre "Win Metawin — Solista"
                 if (idol) query = query.ilike('name', `%${idol}%`); 
 
                 const { data: cards } = await query;
@@ -134,12 +136,13 @@ module.exports = {
                 }
             }
         } else {
-            // Packs fijos (Como el Strawberry que suele dar rarezas altas fijas)
+            // Packs fijos
             for (const { rarity, count } of giveConfig) {
-                let query = supabase.from('base_cards').select('*').eq('rarity_level', rarity);
+                let query = supabase.from('base_cards').select('*')
+                    .eq('rarity_level', rarity)
+                    .eq('is_active', true); // <--- FILTRO AGREGADO
+
                 if (grupo) query = query.eq('group_name', grupo);
-                
-                // --- CORRECCIÓN AQUÍ TAMBIÉN ---
                 if (idol) query = query.ilike('name', `%${idol}%`);
 
                 const { data: cards } = await query;
@@ -157,8 +160,12 @@ module.exports = {
     }
 
     // 3. VERIFICAR RESULTADO
+    // Si no encontró cartas porque el pool las bloqueó (o no existen), no damos nada y NO gastamos el pack.
     if (cardsToGive.length === 0) {
-      return interaction.editReply({ content: '❌ No se pudieron obtener cartas con esos filtros (o el grupo/idol no tiene cartas de la rareza que da este pack). Tu pack está a salvo.', ephemeral: true });
+      return interaction.editReply({ 
+        content: `❌ **No se pudieron obtener cartas.**\nPosibles razones:\n- El filtro (Grupo/Idol) no tiene cartas de la rareza que da este pack.\n- Las cartas de ese artista aún no han sido liberadas (están en Pool de espera).\n\n🔒 **Tu pack ${pack.name} NO se ha gastado.**`, 
+        ephemeral: true 
+      });
     }
 
     // 4. CONSUMIR PACK Y ENTREGAR CARTAS
