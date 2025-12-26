@@ -29,7 +29,7 @@ module.exports = {
     .addBooleanOption(opt => 
       opt.setName('en_espera')
       .setDescription('True = Guardar en Pool (Oculta). False/Vacío = Publicar YA.')
-      .setRequired(false)
+      .setRequired(true)
     ),
 
   async execute(interaction) {
@@ -102,3 +102,4 @@ module.exports = {
     }
   },
 };
+
