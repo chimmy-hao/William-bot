@@ -31,15 +31,16 @@ const LOCATIONS = [
     { city: 'Mexico City', country: 'Mexico 🇲🇽' }
 ];
 
-// GIFs de LYKN (ACTUALIZADOS)
+// GIFs de LYKN (VERSIÓN LIMPIA QUE SÍ CARGA)
+// Nota: Si buscas nuevos, usa Click Derecho -> "Copiar dirección de imagen" y asegúrate que termine en .gif
 const LYKN_GIFS = [
     'https://media.tenor.com/2LpVedAVi88AAAAM/williamjkp-lykn-william.gif',
-    'https://media1.tenor.com/m/Osal72ja-HYAAAAd/lykn-%E0%B8%99%E0%B8%B1%E0%B8%97%E0%B8%95%E0%B8%B8%E0%B9%89%E0%B8%A2.gif',
-    'https://media1.tenor.com/m/Uk-Y4jTKraYAAAAd/lykn-lyknzip.gif',
-    'https://media1.tenor.com/m/dAGPE3yPe_IAAAAd/williamjkp-lykn.gif',
-    'https://media1.tenor.com/m/Vp_AS6zYhOEAAAAd/lykn-lyknzip.gif',
-    'https://media1.tenor.com/m/rFzBqacNSK4AAAAd/queercloud-nnutdan.gif',
-    'https://media1.tenor.com/m/B_1xUYF-TBwAAAAd/william-lykn-thamepo.gif'
+    'https://media.tenor.com/Osal72ja-HYAAAAM/lykn-%E0%B8%99%E0%B8%B1%E0%B8%97%E0%B8%95%E0%B8%B8%E0%B9%89%E0%B8%A2.gif',
+    'https://media.tenor.com/Uk-Y4jTKraYAAAAM/lykn-lyknzip.gif',
+    'https://media.tenor.com/dAGPE3yPe_IAAAAM/williamjkp-lykn.gif',
+    'https://media.tenor.com/Vp_AS6zYhOEAAAAM/lykn-lyknzip.gif',
+    'https://media.tenor.com/rFzBqacNSK4AAAAM/queercloud-nnutdan.gif',
+    'https://media.tenor.com/B_1xUYF-TBwAAAAM/william-lykn-thamepo.gif'
 ];
 
 module.exports = {
@@ -82,12 +83,12 @@ module.exports = {
           const pay = Math.floor(Math.random() * 201) + 100;
           const dest = getDest();
 
-          // AQUI: Agregamos tour_notified: false
+          // AQUI ESTÁN LOS REMINDERS (tour_notified: false)
           await supabase.from('world_tours').insert({ 
               user_id: userId, 
               current_city: 1, 
               last_checkin: now,
-              tour_notified: false // <--- Notificación pendiente
+              tour_notified: false 
           });
           
           await supabase.from('users').update({ balance: (user.balance || 0) + pay }).eq('user_id', userId);
@@ -128,11 +129,11 @@ module.exports = {
           const pay = Math.floor(Math.random() * 201) + 100;
           const dest = getDest();
 
-          // AQUI: Agregamos tour_notified: false
+          // AQUI ESTÁN LOS REMINDERS (tour_notified: false)
           await supabase.from('world_tours').update({ 
               current_city: nextStep, 
               last_checkin: now,
-              tour_notified: false // <--- Notificación pendiente
+              tour_notified: false 
           }).eq('user_id', userId);
 
           await supabase.from('users').update({ balance: (user.balance || 0) + pay }).eq('user_id', userId);
