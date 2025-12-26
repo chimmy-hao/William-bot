@@ -81,18 +81,24 @@ module.exports = {
       // Determinar Rareza
       let targetRarity = rollRarity();
 
-      // Buscar cartas
+      // Buscar cartas (FILTRANDO LAS ACTIVAS)
       let { data: candidateCards, error: fetchError } = await supabase
         .from('base_cards')
         .select('*')
-        .eq('rarity_level', targetRarity);
+        .eq('rarity_level', targetRarity)
+        .eq('is_active', true); // <--- CAMBIO IMPORTANTE: Solo cartas activas
 
       // Fallback si no hay cartas de esa rareza
       if (fetchError || !candidateCards || candidateCards.length === 0) {
-        const { data: backupCards } = await supabase.from('base_cards').select('*');
+        // En el backup también filtramos por activas
+        const { data: backupCards } = await supabase
+            .from('base_cards')
+            .select('*')
+            .eq('is_active', true);
+            
         candidateCards = backupCards;
         if (!candidateCards || candidateCards.length === 0) {
-            return interaction.editReply('❌ Error crítico: No hay cartas en la base de datos.');
+            return interaction.editReply('❌ Error crítico: No hay cartas activas en la base de datos.');
         }
         targetRarity = null; 
       }
