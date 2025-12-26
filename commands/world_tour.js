@@ -34,7 +34,6 @@ const LOCATIONS = [
 // GIFs de LYKN (VERSIÓN LIMPIA QUE SÍ CARGA)
 // Nota: Si buscas nuevos, usa Click Derecho -> "Copiar dirección de imagen" y asegúrate que termine en .gif
 const LYKN_GIFS = [
-    'https://media.tenor.com/2LpVedAVi88AAAAM/williamjkp-lykn-william.gif',
     'https://media.tenor.com/Osal72ja-HYAAAAM/lykn-%E0%B8%99%E0%B8%B1%E0%B8%97%E0%B8%95%E0%B8%B8%E0%B9%89%E0%B8%A2.gif',
     'https://media.tenor.com/Uk-Y4jTKraYAAAAM/lykn-lyknzip.gif',
     'https://media.tenor.com/dAGPE3yPe_IAAAAM/williamjkp-lykn.gif',
