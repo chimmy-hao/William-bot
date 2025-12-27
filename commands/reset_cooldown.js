@@ -15,7 +15,9 @@ const COMMAND_DB_MAP = {
   'weekly':     { last_weekly_claim: 0, weekly_notified: false },
   'alpha':      { alpha_uses: 0, alpha_reset_time: 0, alpha_notified: false },      
   'licuadora':  { licuadora_uses: 0, licuadora_reset_time: 0, licuadora_notified: false },
-  'world_tour': { last_checkin: 0 } 
+  'world_tour': { last_checkin: 0 },
+  'golive':     { last_golive_claim: 0, golive_notified: false }, // <--- AGREGADO
+  'freestyle':  { last_freestyle: 0, freestyle_notified: false }  // <--- AGREGADO
 };
 
 module.exports = {
@@ -33,7 +35,9 @@ module.exports = {
           { name: '🗓️ Weekly', value: 'weekly' },
           { name: '🐺 Project Alpha', value: 'alpha' },
           { name: '🌪️ Licuadora', value: 'licuadora' },
-          { name: '🌍 World Tour', value: 'world_tour' }
+          { name: '🌍 World Tour', value: 'world_tour' },
+          { name: '🔴 Live Stream', value: 'golive' },   // <--- AGREGADO
+          { name: '🎤 Freestyle', value: 'freestyle' }    // <--- AGREGADO
         )
     )
     .addUserOption(option =>
@@ -68,7 +72,6 @@ module.exports = {
       const reason = interaction.options.getString('razon') || 'Sin razón especificada';
 
       // 4. Copiar configuración para poder modificarla
-      // Usamos Spread syntax (...) para crear una copia y no modificar la constante original
       let updateData = { ...COMMAND_DB_MAP[commandName] };
 
       if (!updateData) {
@@ -77,7 +80,6 @@ module.exports = {
 
       // 5. LÓGICA ESPECIAL PARA WORLD TOUR
       // Si queremos repetir el concierto, tenemos que restar 1 a la ciudad actual.
-      // Así, cuando use "next_concert" (que suma 1), volverá al mismo número.
       let targetTable = 'users'; // Por defecto tabla users
 
       if (commandName === 'world_tour') {
