@@ -132,8 +132,14 @@ module.exports = {
           golive_notified: false // <--- Activa el Reminder para dentro de 3 min
       }).eq('user_id', userId);
 
-      // Log (Opcional)
-      // await supabase.from('history_logs').insert({...}) 
+      // --- LOG HISTORIAL ---
+      await supabase.from('history_logs').insert({
+          user_id: userId,
+          action_type: 'golive',
+          amount: earnings,
+          details: `Live Stream finalizado con ${viewers.toLocaleString()} viewers`
+      });
+      // ---------------------
 
       embed.setColor('#2b2d31') // Color gris (apagado)
       embed.setTitle(`⚫ LIVE FINALIZADO | Resumen`)
