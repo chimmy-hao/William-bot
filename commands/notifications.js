@@ -15,7 +15,9 @@ module.exports = {
           { name: '🎰 Photocard', value: 'pref_photocard' },
           { name: '🐺 Alpha', value: 'pref_alpha' },
           { name: '🌪️ Licuadora', value: 'pref_licuadora' },
-          { name: '🌍 World Tour', value: 'pref_world_tour' }, // <--- AGREGADO
+          { name: '🌍 World Tour', value: 'pref_world_tour' },
+          { name: '🔴 Live Stream', value: 'pref_golive' },   // <--- AGREGADO
+          { name: '🎤 Freestyle', value: 'pref_freestyle' },  // <--- AGREGADO
           { name: '🎚️ TODO (Activar/Desactivar todo)', value: 'all' }
         )
     )
@@ -29,7 +31,7 @@ module.exports = {
         )
     ),
 
-  async execute(interaction, supabase) { // Asumo que pasas supabase como argumento o lo requieres dentro
+  async execute(interaction, supabase) { // Se asume que supabase se pasa como argumento
     const userId = interaction.user.id;
     const type = interaction.options.getString('tipo');
     const newState = interaction.options.getString('estado') === 'true';
@@ -49,7 +51,9 @@ module.exports = {
             pref_photocard: newState,
             pref_alpha: newState,
             pref_licuadora: newState,
-            pref_world_tour: newState // <--- AGREGADO
+            pref_world_tour: newState,
+            pref_golive: newState,    // <--- AGREGADO
+            pref_freestyle: newState  // <--- AGREGADO
         };
         description = newState 
             ? '✅ Has activado **TODAS** las notificaciones.' 
@@ -64,7 +68,9 @@ module.exports = {
             pref_photocard: 'Photocard', 
             pref_alpha: 'Alpha', 
             pref_licuadora: 'Licuadora',
-            pref_world_tour: 'World Tour' // <--- AGREGADO
+            pref_world_tour: 'World Tour',
+            pref_golive: 'Live Stream',   // <--- AGREGADO
+            pref_freestyle: 'Freestyle'   // <--- AGREGADO
         };
         
         const friendlyName = nameMap[type] || type; // Fallback por seguridad
