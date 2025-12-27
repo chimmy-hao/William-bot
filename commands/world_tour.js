@@ -31,8 +31,7 @@ const LOCATIONS = [
     { city: 'Mexico City', country: 'Mexico 🇲🇽' }
 ];
 
-// GIFs de LYKN (VERSIÓN LIMPIA QUE SÍ CARGA)
-// Nota: Si buscas nuevos, usa Click Derecho -> "Copiar dirección de imagen" y asegúrate que termine en .gif
+// GIFs de LYKN
 const LYKN_GIFS = [
     'https://media.tenor.com/Osal72ja-HYAAAAM/lykn-%E0%B8%99%E0%B8%B1%E0%B8%97%E0%B8%95%E0%B8%B8%E0%B9%89%E0%B8%A2.gif',
     'https://media.tenor.com/Uk-Y4jTKraYAAAAM/lykn-lyknzip.gif',
@@ -82,7 +81,7 @@ module.exports = {
           const pay = Math.floor(Math.random() * 201) + 100;
           const dest = getDest();
 
-          // AQUI ESTÁN LOS REMINDERS (tour_notified: false)
+          // Crear tour
           await supabase.from('world_tours').insert({ 
               user_id: userId, 
               current_city: 1, 
@@ -90,7 +89,17 @@ module.exports = {
               tour_notified: false 
           });
           
+          // Pagar
           await supabase.from('users').update({ balance: (user.balance || 0) + pay }).eq('user_id', userId);
+
+          // --- LOG HISTORIAL ---
+          await supabase.from('history_logs').insert({
+              user_id: userId,
+              action_type: 'world_tour',
+              amount: pay,
+              details: `World Tour Start: ${dest.city}`
+          });
+          // ---------------------
 
           const embed = new EmbedBuilder()
               .setColor('#FF0055') 
@@ -128,14 +137,24 @@ module.exports = {
           const pay = Math.floor(Math.random() * 201) + 100;
           const dest = getDest();
 
-          // AQUI ESTÁN LOS REMINDERS (tour_notified: false)
+          // Avanzar
           await supabase.from('world_tours').update({ 
               current_city: nextStep, 
               last_checkin: now,
               tour_notified: false 
           }).eq('user_id', userId);
 
+          // Pagar
           await supabase.from('users').update({ balance: (user.balance || 0) + pay }).eq('user_id', userId);
+
+          // --- LOG HISTORIAL ---
+          await supabase.from('history_logs').insert({
+              user_id: userId,
+              action_type: 'world_tour',
+              amount: pay,
+              details: `World Tour: Concierto ${nextStep} en ${dest.city}`
+          });
+          // ---------------------
 
           const embed = new EmbedBuilder()
               .setColor('#9B59B6')
@@ -166,8 +185,19 @@ module.exports = {
               { id: 'grape', name: 'Grape Pack', emoji: grapeEmoji }
           ];
 
+          // 1. Dar Dinero
           await supabase.from('users').update({ balance: (user.balance || 0) + finalCoins }).eq('user_id', userId);
 
+          // --- LOG HISTORIAL ---
+          await supabase.from('history_logs').insert({
+              user_id: userId,
+              action_type: 'world_tour',
+              amount: finalCoins,
+              details: `World Tour Finalizado (Bonus + Packs)`
+          });
+          // ---------------------
+
+          // 2. Dar Packs (Inventario)
           for (const p of packs) {
               const { data: inv } = await supabase
                 .from('user_inventory')
@@ -184,7 +214,7 @@ module.exports = {
               );
           }
 
-          // Reset (borra el tour)
+          // 3. Reset (borra el tour)
           await supabase.from('world_tours').delete().eq('user_id', userId);
 
           const embed = new EmbedBuilder()
