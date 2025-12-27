@@ -237,6 +237,14 @@ module.exports = {
         return interaction.editReply('❌ Hubo un error al entregar tu nueva carta. Contacta a soporte.');
       }
 
+      // --- AGREGADO: HISTORIAL (Level Up) ---
+      await supabase.from('history_logs').insert({
+          user_id: userId,
+          action_type: 'level_up',
+          details: `Level Up: ${cleanName} (${currentRarity} -> ${nextRarity})`
+      });
+      // --------------------------------------
+
       // --- VISUALIZACIÓN (CANVAS 15px) ---
       let attachment = null;
       try {
