@@ -186,6 +186,14 @@ module.exports = {
         }]);
     }
 
+    // --- AGREGADO: HISTORIAL (Pack Open) ---
+    await supabase.from('history_logs').insert({
+        user_id: userId,
+        action_type: 'pack_open',
+        details: `Abrió ${pack.name}. Obtuvo ${finalCards.length} cartas.`
+    });
+    // ---------------------------------------
+
     // 5. MOSTRAR RESULTADO
     const rarityEmoji = '<:strawberrity:1411384728119939182>';
     const cardList = finalCards.map(c => {
