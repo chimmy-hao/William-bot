@@ -10,7 +10,7 @@ module.exports = {
             .setTitle('🍓 Guía de Comandos de William')
             .setDescription('¡Hola! Soy William, el Main Vocalist de LYKN 🎤.\nAquí tienes la lista de todo lo que puedo hacer por ti en el servidor:')
             .setColor('#ff3366') // Un color fresa/rojo vibrante
-            .setThumbnail(interaction.client.user.displayAvatarURL()) // Pone la foto del bot en pequeño
+            .setThumbnail(interaction.client.user.displayAvatarURL()) 
             .addFields(
                 {
                     name: '💰 Economía y Obtención (Gacha)',
@@ -21,7 +21,8 @@ module.exports = {
                         '**/work**: 💼 Envía a tu idol favorito a trabajar para ganar Berrycoins.',
                         '**/shop**: 🛍️ Muestra el catálogo y precios de los Packs en la tienda.',
                         '**/buy**: 🛒 Compra Packs de la tienda o cartas del Marketplace.',
-                        '**/use**: 🎁 Abre los packs que tienes en tu inventario.'
+                        '**/use**: 🎁 Abre los packs que tienes en tu inventario.',
+                        '**/strawberry**: 🍓 Busca la Frutilla Dorada escondida en el servidor para ganar un premio gigante.'
                     ].join('\n')
                 },
                 {
@@ -52,7 +53,9 @@ module.exports = {
                         '**/licuadora**: 🌪️ Recicla tus cartas repetidas para crear Packs nuevos.',
                         '**/level_up**: ⬆️ Fusiona 10 cartas idénticas para obtener la versión de siguiente rareza.',
                         '**/alpha**: 🐺 Juego de riesgo: intenta evolucionar una carta con probabilidad de perderla.',
-                        '**/world_tour**: ✈️ (Comando de evento/viaje - Descripción pendiente según tu código).',
+                        '**/world_tour**: ✈️ Viaja con LYKN por el mundo dando conciertos y ganando fans (cada 15 min).',
+                        '**/golive**: 🔴 Haz un Live Stream sorpresa para interactuar con fans y ganar donaciones (cada 3 min).',
+                        '**/freestyle**: 🎤 Escribe tus mejores rimas en 15 segundos para impresionar al público (cada 15 min).',
                         '**/cooldowns**: ⏱️ Muestra cuánto tiempo te falta para usar tus comandos diarios/gacha.',
                         '**/notifications**: 🔔 Configura si quieres que el bot te avise cuando tus tiempos terminen.'
                     ].join('\n')
@@ -60,8 +63,7 @@ module.exports = {
             )
             .setFooter({ text: 'Usa los comandos con sabiduría 🍓 ✨' });
 
-        // Enviamos el embed. Usamos ephemeral: true si quieres que solo lo vea quien lo pide.
-        // Si quieres que lo vean todos, quita la línea de ephemeral.
-        await interaction.reply({ embeds: [embed] /*, ephemeral: true */ });
+        // Enviamos el embed. 
+        await interaction.reply({ embeds: [embed] });
     },
 };
