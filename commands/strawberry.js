@@ -8,6 +8,9 @@ const REWARD_AMOUNT = 5000; // ¡Es dorada, vale mucho!
 const MONEY_EMOJI = '<:berrycoin:1411737957081288724>';
 const STRAWBERRY_IMG = 'https://media.tenor.com/P1U_LqudM7AAAAAM/strawberry-fruit.gif'; // Una frutilla brillante
 
+// IDs de roles permitidos (Managers/Admins)
+const ALLOWED_ROLES = ['1413313501694263357', '1412852141197885464'];
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('strawberry')
@@ -105,6 +108,15 @@ module.exports = {
                 } else {
                     await supabase.from('users').insert({ user_id: userId, balance: newBalance });
                 }
+
+                // --- AGREGAR ESTO PARA EL HISTORIAL ---
+                await supabase.from('history_logs').insert({
+                    user_id: userId,
+                    action_type: 'strawberry_win',
+                    amount: REWARD_AMOUNT,
+                    details: `Encontró la Frutilla Dorada en #${interaction.channel.name}`
+                });
+                // --------------------------------------
 
                 // 4. Anunciar ganador
                 const winEmbed = new EmbedBuilder()
