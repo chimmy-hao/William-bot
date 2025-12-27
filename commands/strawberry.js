@@ -1,0 +1,128 @@
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { createClient } = require('@supabase/supabase-js');
+
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+
+// Configuración
+const REWARD_AMOUNT = 5000; // ¡Es dorada, vale mucho!
+const MONEY_EMOJI = '<:berrycoin:1411737957081288724>';
+const STRAWBERRY_IMG = 'https://media.tenor.com/P1U_LqudM7AAAAAM/strawberry-fruit.gif'; // Una frutilla brillante
+
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setName('strawberry')
+        .setDescription('🍓 Evento de la Frutilla Dorada')
+        .addSubcommand(sub =>
+            sub.setName('hide')
+                .setDescription('ADMIN: Esconde la frutilla en un canal.')
+                .addChannelOption(option => 
+                    option.setName('canal')
+                    .setDescription('¿Dónde la escondemos?')
+                    .setRequired(true))
+        )
+        .addSubcommand(sub =>
+            sub.setName('found')
+                .setDescription('¡Reclama la frutilla si está en este canal!')
+        ),
+
+    async execute(interaction) {
+        const subcommand = interaction.options.getSubcommand();
+        const userId = interaction.user.id;
+
+        try {
+            // ================================================================
+            // 🕵️‍♀️ HIDE (Solo para VOS/Admin)
+            // ================================================================
+            if (subcommand === 'hide') {
+                // Chequeo de permisos (Solo admins pueden esconderla)
+                if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+                    return interaction.reply({ content: '❌ Solo los admins pueden esconder la frutilla.', ephemeral: true });
+                }
+
+                const targetChannel = interaction.options.getChannel('canal');
+
+                await interaction.deferReply({ ephemeral: true });
+
+                // 1. Guardar en DB dónde está escondida
+                // Usamos una tabla 'game_state' para guardar el estado global
+                const { error } = await supabase.from('game_state').upsert({ 
+                    event_name: 'golden_strawberry', 
+                    active_channel_id: targetChannel.id,
+                    is_active: true 
+                });
+
+                if (error) {
+                    console.error(error);
+                    return interaction.editReply('❌ Error al guardar en base de datos.');
+                }
+
+                // 2. Mandar el mensaje en el canal objetivo
+                const embed = new EmbedBuilder()
+                    .setColor('#FFD700') // Dorado
+                    .setTitle('✨ ¡APARECIÓ UNA FRUTILLA DORADA! ✨')
+                    .setDescription(`¡Rápido! El primero en usar \`/strawberry found\` en este canal se lleva **${REWARD_AMOUNT}** ${MONEY_EMOJI}.`)
+                    .setImage(STRAWBERRY_IMG);
+
+                await targetChannel.send({ embeds: [embed] });
+
+                return interaction.editReply(`✅ Frutilla escondida exitosamente en ${targetChannel}. ¡Que comiencen los juegos!`);
+            }
+
+            // ================================================================
+            // 🏃‍♂️ FOUND (Para los usuarios)
+            // ================================================================
+            if (subcommand === 'found') {
+                await interaction.deferReply();
+
+                // 1. Consultar si hay una frutilla activa
+                const { data: gameState } = await supabase
+                    .from('game_state')
+                    .select('*')
+                    .eq('event_name', 'golden_strawberry')
+                    .single();
+
+                // Validaciones
+                if (!gameState || !gameState.is_active) {
+                    return interaction.editReply('❌ No hay ninguna Frutilla Dorada escondida en este momento.');
+                }
+
+                if (gameState.active_channel_id !== interaction.channelId) {
+                    return interaction.editReply('❌ **Aquí no hay nada.** Sigue buscando en otros canales...');
+                }
+
+                // 2. ¡GANADOR! - Actualizar DB para que nadie más la gane
+                // Ponemos is_active en false inmediatamente
+                await supabase.from('game_state').update({ is_active: false }).eq('event_name', 'golden_strawberry');
+
+                // 3. Dar dinero al usuario
+                const { data: user } = await supabase.from('users').select('balance').eq('user_id', userId).single();
+                
+                // Si el usuario no existe, lo creamos
+                let newBalance = REWARD_AMOUNT;
+                if (user) {
+                    newBalance = (user.balance || 0) + REWARD_AMOUNT;
+                    await supabase.from('users').update({ balance: newBalance }).eq('user_id', userId);
+                } else {
+                    await supabase.from('users').insert({ user_id: userId, balance: newBalance });
+                }
+
+                // 4. Anunciar ganador
+                const winEmbed = new EmbedBuilder()
+                    .setColor('#00FF00')
+                    .setTitle('🏆 ¡TENEMOS UN GANADOR!')
+                    .setDescription(
+                        `**${interaction.user.username}** encontró la Frutilla Dorada. 🍓\n\n` +
+                        `💰 **Premio:** ${REWARD_AMOUNT} ${MONEY_EMOJI}\n` +
+                        `📍 **Ubicación:** ${interaction.channel}`
+                    )
+                    .setFooter({ text: 'Atentos a la próxima ronda...' });
+
+                return interaction.editReply({ embeds: [winEmbed] });
+            }
+
+        } catch (err) {
+            console.error(err);
+            interaction.editReply('❌ Ocurrió un error inesperado.');
+        }
+    }
+};
