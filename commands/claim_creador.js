@@ -1,12 +1,10 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 
-// Nota: Asegúrate de que esta tabla (base_cards) tenga políticas RLS que permitan UPDATE
-// o que el RLS esté desactivado, sino devolverá 0 cambios siempre.
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 // ROLES PERMITIDOS
-const ALLOWED_ROLES = ['1413313501694263357', '1412852141197885464'];
+const ALLOWED_ROLES = ['1411356087977906317', '1454331429637853224'];
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -87,15 +85,11 @@ module.exports = {
       // CASO 1: POR CÓDIGO
       if (code) {
         const cleanCode = code.trim();
-        // Corrección: Usamos backticks `` para insertar la variable correctamente
-        // El % al final permite que si pones "WIN3" encuentre "WIN3", "WIN3.1", "WIN3-A"
         query = query.ilike('card_code', `${cleanCode}%`); 
         filterMsg = `Código: ${cleanCode}`;
       } 
       // CASO 2: GRUPO + ERA
       else if (group && era) {
-        // Corrección: Agregamos % a ambos lados.
-        // Esto soluciona si en la DB hay espacios extra tipo "Solista " o " Solista"
         query = query.ilike('group_name', `%${group.trim()}%`)
                      .ilike('era', `%${era.trim()}%`);
         
@@ -118,10 +112,19 @@ module.exports = {
       if (error) throw error;
 
       if (!updatedCards || updatedCards.length === 0) {
-        // Si entra aquí, es 99% seguro un tema de RLS (Permisos de Supabase)
-        // o que los datos no coinciden ni siquiera con los comodines.
         return interaction.editReply(`⚠️ **No se actualizó nada.**\nFiltro usado: ${filterMsg}\n\n**Posible causa:** Revisa si la tabla \`base_cards\` tiene el RLS activado en Supabase.`);
       }
+
+      // --- CONTADOR STAFF (Claim) ---
+      // 1. Buscamos cuánto tiene acumulado el usuario
+      const { data: userData } = await supabase.from('users').select('pending_claims').eq('user_id', interaction.user.id).single();
+      const currentClaims = userData?.pending_claims || 0;
+      
+      // 2. Sumamos la cantidad de cartas que acaba de editar
+      await supabase.from('users').update({ 
+          pending_claims: currentClaims + updatedCards.length 
+      }).eq('user_id', interaction.user.id);
+      // ------------------------------
 
       const embed = new EmbedBuilder()
         .setColor('#00ff00')
@@ -132,7 +135,7 @@ module.exports = {
             { name: 'Filtro', value: filterMsg, inline: true },
             { name: 'Ejemplos', value: updatedCards.slice(0, 5).map(c => `• ${c.name} (${c.card_code})`).join('\n') || 'Varias...', inline: false }
         )
-        .setFooter({ text: 'Cambios aplicados inmediatamente.' });
+        .setFooter({ text: 'Trabajo registrado para el próximo pago.' });
 
       await interaction.editReply({ embeds: [embed] });
 
