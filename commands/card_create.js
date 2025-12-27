@@ -37,7 +37,7 @@ module.exports = {
       await interaction.deferReply({ ephemeral: true });
 
       // Verificar Roles
-      const allowedRoles = ['1411356087977906317', '1411356161063518228'];
+      const allowedRoles = ['1411356161063518228'];
       if (!allowedRoles.some(r => interaction.member.roles.cache.has(r))) {
         return interaction.editReply('❌ No tienes permisos.');
       }
@@ -47,9 +47,6 @@ module.exports = {
       const idol = interaction.options.getString('idol');
       const era = interaction.options.getString('era');
       
-      // LÓGICA DEL INTERRUPTOR
-      // Si el usuario no pone nada, es false (Publicar YA).
-      // Si pone True, se va al pool (is_active = false).
       const sendToPool = interaction.options.getBoolean('en_espera') || false;
       const isActive = !sendToPool; 
 
@@ -62,7 +59,7 @@ module.exports = {
       const up2 = await uploadWebp(interaction.options.getAttachment('image2').url, `${baseId}2`);
       const up3 = await uploadWebp(interaction.options.getAttachment('image3').url, `${baseId}3`);
 
-      // Insertar en DB con el estado is_active correcto
+      // Insertar en DB
       const cards = [
         { card_code: `${baseId}1`, name: idol, group_name: group, image_url: up1.secure_url, rarity: 'common', rarity_level: 1, era, is_active: isActive },
         { card_code: `${baseId}2`, name: idol, group_name: group, image_url: up2.secure_url, rarity: 'rare', rarity_level: 2, era, is_active: isActive },
@@ -72,7 +69,18 @@ module.exports = {
       const { error } = await supabase.from('base_cards').insert(cards);
       if (error) throw new Error(error.message);
 
-      // --- ANUNCIO PÚBLICO (SE ENVÍA SIEMPRE) ---
+      // --- CONTADOR STAFF (Create) ---
+      // 1. Buscamos acumulado
+      const { data: userData } = await supabase.from('users').select('pending_creates').eq('user_id', interaction.user.id).single();
+      const currentCreates = userData?.pending_creates || 0;
+
+      // 2. Sumamos 3 (porque son 3 cartas: Common, Rare, Leg)
+      await supabase.from('users').update({ 
+          pending_creates: currentCreates + 3 
+      }).eq('user_id', interaction.user.id);
+      // -------------------------------
+
+      // --- ANUNCIO PÚBLICO ---
       const embed = new EmbedBuilder()
         .setColor('#2c2d31')
         .setTitle('✨ New photocards have been added!')
@@ -89,11 +97,11 @@ module.exports = {
         if (channel) await channel.send({ embeds: [embed] });
       } catch (e) { console.error('Error enviando anuncio:', e); }
 
-      // --- RESPUESTA FINAL AL MANAGER ---
+      // --- RESPUESTA FINAL ---
       if (sendToPool) {
-        await interaction.editReply(`🔒 **Anunciada y Guardada en Pool (Oculta).**\nEl anuncio se envió, pero la carta no saldrá en sobres hasta que uses \`/release_all\`.`);
+        await interaction.editReply(`🔒 **Anunciada y Guardada en Pool.**\nTrabajo registrado (+3 creates).`);
       } else {
-        await interaction.editReply('✅ **Publicada (Visible) y Anunciada.**\nLa carta ya se puede conseguir en sobres.');
+        await interaction.editReply('✅ **Publicada y Anunciada.**\nTrabajo registrado (+3 creates).');
       }
 
     } catch (err) {
@@ -102,4 +110,3 @@ module.exports = {
     }
   },
 };
-
