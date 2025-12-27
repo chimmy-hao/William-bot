@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js'); // Borré PermissionFlagsBits que ya no se usa
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
@@ -34,12 +34,15 @@ module.exports = {
 
         try {
             // ================================================================
-            // 🕵️‍♀️ HIDE (Solo para VOS/Admin)
+            // 🕵️‍♀️ HIDE (Solo para VOS/Admin según Roles)
             // ================================================================
             if (subcommand === 'hide') {
-                // Chequeo de permisos (Solo admins pueden esconderla)
-                if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-                    return interaction.reply({ content: '❌ Solo los admins pueden esconder la frutilla.', ephemeral: true });
+                // CORRECCIÓN: Usamos la lista de roles en lugar de permiso de Admin
+                const memberRoles = interaction.member.roles.cache;
+                const hasPermission = ALLOWED_ROLES.some(roleId => memberRoles.has(roleId));
+
+                if (!hasPermission) {
+                    return interaction.reply({ content: '❌ No tienes permisos para esconder la frutilla.', ephemeral: true });
                 }
 
                 const targetChannel = interaction.options.getChannel('canal');
@@ -47,7 +50,6 @@ module.exports = {
                 await interaction.deferReply({ ephemeral: true });
 
                 // 1. Guardar en DB dónde está escondida
-                // Usamos una tabla 'game_state' para guardar el estado global
                 const { error } = await supabase.from('game_state').upsert({ 
                     event_name: 'golden_strawberry', 
                     active_channel_id: targetChannel.id,
@@ -94,13 +96,11 @@ module.exports = {
                 }
 
                 // 2. ¡GANADOR! - Actualizar DB para que nadie más la gane
-                // Ponemos is_active en false inmediatamente
                 await supabase.from('game_state').update({ is_active: false }).eq('event_name', 'golden_strawberry');
 
                 // 3. Dar dinero al usuario
                 const { data: user } = await supabase.from('users').select('balance').eq('user_id', userId).single();
                 
-                // Si el usuario no existe, lo creamos
                 let newBalance = REWARD_AMOUNT;
                 if (user) {
                     newBalance = (user.balance || 0) + REWARD_AMOUNT;
@@ -109,14 +109,14 @@ module.exports = {
                     await supabase.from('users').insert({ user_id: userId, balance: newBalance });
                 }
 
-                // --- AGREGAR ESTO PARA EL HISTORIAL ---
+                // --- AGREGADO: Log al Historial ---
                 await supabase.from('history_logs').insert({
                     user_id: userId,
                     action_type: 'strawberry_win',
                     amount: REWARD_AMOUNT,
                     details: `Encontró la Frutilla Dorada en #${interaction.channel.name}`
                 });
-                // --------------------------------------
+                // ----------------------------------
 
                 // 4. Anunciar ganador
                 const winEmbed = new EmbedBuilder()
