@@ -32,203 +32,163 @@ module.exports = {
     // OPCIÓN C: CANTIDAD (Solo para packs)
     .addIntegerOption(opt => 
         opt.setName('amount')
-          .setDescription('Cantidad de Packs a comprar (Solo aplica si eliges un Pack)')
+          .setDescription('Cantidad de Packs a comprar (Máximo 10)')
           .setMinValue(1)
-          .setMaxValue(50)
+          .setMaxValue(10)
           .setRequired(false)
     ),
 
   async autocomplete(interaction) {
-    const focusedValue = interaction.options.getFocused().toLowerCase();
-
-    // Buscamos packs en DB
-    const { data: packs } = await supabase
-      .from('packs')
-      .select('code, name, price')
-      .order('price', { ascending: true });
-
-    if (!packs) return interaction.respond([]);
-
-    const filtered = packs.filter(p => p.name.toLowerCase().includes(focusedValue));
-
-    await interaction.respond(
-      filtered.slice(0, 25).map(p => ({
-        name: `${p.name} (${p.price} 💰)`, 
-        value: p.code
-      }))
-    );
+    const focused = interaction.options.getFocused(true);
+    if (focused.name === 'pack') {
+        const { data: packs } = await supabase.from('packs').select('name, code');
+        if (!packs) return interaction.respond([]);
+        const filtered = packs.filter(p => p.name.toLowerCase().includes(focused.value.toLowerCase()));
+        await interaction.respond(
+            filtered.slice(0, 25).map(p => ({ name: p.name, value: p.code }))
+        );
+    }
   },
 
   async execute(interaction) {
     const userId = interaction.user.id;
-    const username = interaction.user.username;
-    
     const packCode = interaction.options.getString('pack');
-    const cardsInput = interaction.options.getString('cards');
-    const quantity = interaction.options.getInteger('amount') || 1; 
-
-    // Validación inicial
-    if (!packCode && !cardsInput) {
-        return interaction.reply({ content: '⚠️ Debes elegir un **Pack** o escribir códigos de **Cartas**.', ephemeral: true });
-    }
-    if (packCode && cardsInput) {
-        return interaction.reply({ content: '⚠️ Por favor, compra Packs o Cartas por separado.', ephemeral: true });
-    }
+    const cardCodesInput = interaction.options.getString('cards');
+    const amount = interaction.options.getInteger('amount') || 1;
 
     try {
+        if (!packCode && !cardCodesInput) {
+            return interaction.reply({ content: '❌ Debes elegir qué comprar: un **Pack** o **Cartas** del mercado.', ephemeral: true });
+        }
+
         await interaction.deferReply();
 
-        // --- VARIABLES PARA EL RESUMEN ---
-        let totalCost = 0;
-        let confirmTitle = '';
-        let confirmDescription = '';
-        let purchaseType = ''; // 'pack' o 'cards'
-        
-        // Datos temporales
-        let packData = null;
-        let cardsToBuy = [];
+        // 1. Obtener usuario (Balance)
+        const { data: user } = await supabase.from('users').select('balance').eq('user_id', userId).single();
+        if (!user) return interaction.editReply('❌ No tienes cuenta registrada. Usa /work primero.');
 
-        // ====================================================
-        // 1. PREPARACIÓN: SI ES PACK
-        // ====================================================
+        // ==================================================================
+        // 🛍️ CASO A: COMPRAR PACK
+        // ==================================================================
         if (packCode) {
-            const { data: pack } = await supabase.from('packs').select('*').eq('code', packCode).single();
-            if (!pack) return interaction.editReply('❌ Ese pack no existe.');
+            const { data: packConfig } = await supabase.from('packs').select('*').eq('code', packCode).single();
+            if (!packConfig) return interaction.editReply('❌ Ese pack no existe.');
 
-            purchaseType = 'pack';
-            packData = pack;
-            totalCost = pack.price * quantity;
-            
-            confirmTitle = `🛒 Confirmar compra de Pack`;
-            confirmDescription = `**Item:** ${pack.emoji} ${pack.name}\n**Cantidad:** x${quantity}\n**Total:** ${totalCost} ${moneyEmoji}`;
+            const totalCost = packConfig.price * amount;
+
+            if (user.balance < totalCost) {
+                return interaction.editReply(`❌ **Fondos insuficientes.**\nNecesitas: ${totalCost} ${moneyEmoji}\nTienes: ${user.balance} ${moneyEmoji}`);
+            }
+
+            // Transacción
+            // 1. Descontar dinero
+            await supabase.from('users').update({ balance: user.balance - totalCost }).eq('user_id', userId);
+
+            // 2. Dar Pack (Upsert: Sumar a lo que ya tiene)
+            const { data: currentPack } = await supabase.from('user_packs').select('quantity').eq('user_id', userId).eq('pack_code', packCode).single();
+            const newQuantity = (currentPack?.quantity || 0) + amount;
+
+            await supabase.from('user_packs').upsert({ 
+                user_id: userId, 
+                pack_code: packCode, 
+                quantity: newQuantity 
+            }, { onConflict: ['user_id', 'pack_code'] });
+
+            // --- HISTORIAL (Pack Buy) ---
+            await supabase.from('history_logs').insert({
+                user_id: userId,
+                action_type: 'pack_buy',
+                amount: -totalCost, // Negativo para indicar gasto
+                details: `Compró ${amount}x ${packConfig.name}`
+            });
+            // ----------------------------
+
+            return interaction.editReply(`✅ **¡Compra exitosa!**\nHas comprado **${amount}x ${packConfig.emoji} ${packConfig.name}** por **${totalCost}** ${moneyEmoji}.`);
         }
 
-        // ====================================================
-        // 2. PREPARACIÓN: SI SON CARTAS (MARKETPLACE)
-        // ====================================================
-        if (cardsInput) {
-            purchaseType = 'cards';
+        // ==================================================================
+        // 🏷️ CASO B: COMPRAR CARTA (Marketplace)
+        // ==================================================================
+        if (cardCodesInput) {
             // Limpiar códigos
-            const codesArr = [...new Set(cardsInput.split(/[\s,]+/).filter(c => c))];
-
-            // Buscar en DB todas las cartas que coincidan con esos códigos
-            const { data: foundCards, error } = await supabase
+            const codes = [...new Set(cardCodesInput.split(/[\s,]+/).filter(c => c.length > 0))];
+            
+            // Buscar cartas en venta
+            const { data: cardsInMarket } = await supabase
                 .from('user_cards')
                 .select(`
-                    id, user_id, unique_card_id, market_price,
-                    base_cards (name, group_name, rarity_level)
+                    id, unique_card_id, market_price, user_id, 
+                    base_cards (name, group_name)
                 `)
-                .in('unique_card_id', codesArr);
+                .in('unique_card_id', codes)
+                .not('market_price', 'is', null); // Solo las que tienen precio
 
-            if (error) throw error;
+            if (!cardsInMarket || cardsInMarket.length === 0) {
+                return interaction.editReply('❌ Ninguna de las cartas indicadas está a la venta.');
+            }
 
-            // Filtrar solo las que se pueden comprar
-            // (Tienen precio, no son mías)
-            const validCards = foundCards.filter(c => 
-                c.market_price !== null && 
-                c.user_id !== userId
-            );
+            // Validar
+            let totalCost = 0;
+            const validCards = [];
+            const errors = [];
+
+            for (const card of cardsInMarket) {
+                if (card.user_id === userId) {
+                    errors.push(`- **${card.unique_card_id}**: ¡Es tuya! No puedes comprarte a ti mismo.`);
+                    continue;
+                }
+                validCards.push(card);
+                totalCost += card.market_price;
+            }
 
             if (validCards.length === 0) {
-                return interaction.editReply('❌ Ninguna de las cartas ingresadas está disponible para comprar (o son tuyas).');
+                return interaction.editReply(`❌ No se puede procesar la compra:\n${errors.join('\n')}`);
             }
 
-            cardsToBuy = validCards;
-            totalCost = validCards.reduce((sum, c) => sum + c.market_price, 0);
-
-            // Crear lista visual para el embed
-            const cardList = validCards.map(c => 
-                `• **${c.base_cards.name}** (${c.base_cards.group_name}) - \`${c.unique_card_id}\` - **${c.market_price}** ${moneyEmoji}`
-            ).join('\n');
-
-            confirmTitle = `🛒 Confirmar compra de Cartas`;
-            confirmDescription = `Has seleccionado **${validCards.length}** carta(s) válida(s).\n\n${cardList}\n\n**Total a Pagar:** ${totalCost} ${moneyEmoji}`;
-            
-            // Advertencia si algunos códigos no eran válidos
-            if (validCards.length < codesArr.length) {
-                confirmDescription += `\n⚠️ *(${codesArr.length - validCards.length} códigos fueron ignorados por no estar en venta o ser tuyos).*`;
-            }
-        }
-
-        // ====================================================
-        // 3. VERIFICAR BALANCE DEL COMPRADOR
-        // ====================================================
-        const { data: buyerData } = await supabase.from('users').select('balance').eq('user_id', userId).single();
-        // Si no tiene perfil, lo creamos con 0
-        let currentBalance = buyerData ? buyerData.balance : 0;
-        if (!buyerData) {
-             await supabase.from('users').insert({ user_id: userId, username, balance: 0 });
-             currentBalance = 0;
-        }
-
-        if (currentBalance < totalCost) {
-            return interaction.editReply(`❌ **Fondos Insuficientes.**\nNecesitas: **${totalCost}** ${moneyEmoji}\nTienes: **${currentBalance}** ${moneyEmoji}`);
-        }
-
-        // ====================================================
-        // 4. MOSTRAR CONFIRMACIÓN
-        // ====================================================
-        const confirmEmbed = new EmbedBuilder()
-            .setColor('#f1c40f') // Amarillo
-            .setTitle(confirmTitle)
-            .setDescription(confirmDescription)
-            .setFooter({ text: 'Tienes 60 segundos para confirmar.' });
-
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('confirm_buy').setLabel('Comprar').setStyle(ButtonStyle.Success).setEmoji('✅'),
-            new ButtonBuilder().setCustomId('cancel_buy').setLabel('Cancelar').setStyle(ButtonStyle.Danger).setEmoji('✖️')
-        );
-
-        const message = await interaction.editReply({ embeds: [confirmEmbed], components: [row] });
-
-        // ====================================================
-        // 5. COLLECTOR (Esperar clic)
-        // ====================================================
-        const collector = message.createMessageComponentCollector({
-            componentType: ComponentType.Button,
-            time: 60000,
-            filter: i => i.user.id === userId
-        });
-
-        collector.on('collect', async i => {
-            if (i.customId === 'cancel_buy') {
-                collector.stop('cancelled');
-                await i.update({ content: '❌ Compra cancelada.', embeds: [], components: [] });
-                return;
+            if (user.balance < totalCost) {
+                return interaction.editReply(`❌ **Fondos insuficientes.**\nTotal a pagar: ${totalCost} ${moneyEmoji}\nTienes: ${user.balance} ${moneyEmoji}`);
             }
 
-            if (i.customId === 'confirm_buy') {
-                // --- RE-VERIFICACIÓN ATÓMICA ---
-                // Volvemos a chequear el saldo por si gastó dinero en otro canal mientras pensaba
-                const { data: freshUser } = await supabase.from('users').select('balance').eq('user_id', userId).single();
-                if (freshUser.balance < totalCost) {
-                    collector.stop('no_funds');
-                    return i.update({ content: '❌ Fondos insuficientes al momento de procesar.', embeds: [], components: [] });
+            // CONFIRMACIÓN
+            const embed = new EmbedBuilder()
+                .setColor('#f1c40f')
+                .setTitle('🛒 Confirmar Compra')
+                .setDescription(
+                    `Estás a punto de comprar **${validCards.length} cartas** por **${totalCost}** ${moneyEmoji}.\n\n` +
+                    validCards.map(c => `• **${c.base_cards.name}** (${c.unique_card_id}) - ${c.market_price} ${moneyEmoji}`).join('\n')
+                );
+
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('confirm_buy').setLabel('✅ Confirmar y Pagar').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId('cancel_buy').setLabel('❌ Cancelar').setStyle(ButtonStyle.Secondary)
+            );
+
+            const msg = await interaction.editReply({ embeds: [embed], components: [row] });
+
+            // Collector
+            const filter = i => i.user.id === userId;
+            const collector = msg.createMessageComponentCollector({ filter, componentType: ComponentType.Button, time: 60000 });
+
+            collector.on('collect', async i => {
+                if (i.customId === 'cancel_buy') {
+                    collector.stop();
+                    await i.update({ content: '❌ Compra cancelada.', embeds: [], components: [] });
+                    return;
                 }
 
-                // --- EJECUCIÓN DE LA COMPRA ---
-                
-                if (purchaseType === 'pack') {
-                    // 1. Restar dinero
-                    await supabase.from('users').update({ balance: freshUser.balance - totalCost }).eq('user_id', userId);
-                    
-                    // 2. Dar Packs
-                    const { data: userPack } = await supabase.from('user_packs').select('quantity').eq('user_id', userId).eq('pack_code', packData.code).single();
-                    const newQty = (userPack?.quantity || 0) + quantity;
-                    
-                    await supabase.from('user_packs').upsert(
-                        { user_id: userId, pack_code: packData.code, quantity: newQty },
-                        { onConflict: ['user_id', 'pack_code'] }
-                    );
-                }
+                if (i.customId === 'confirm_buy') {
+                    // Re-verificar balance por seguridad
+                    const { data: checkUser } = await supabase.from('users').select('balance').eq('user_id', userId).single();
+                    if (checkUser.balance < totalCost) {
+                        return i.update({ content: '❌ Fondos insuficientes al momento de pagar.', embeds: [], components: [] });
+                    }
 
-                if (purchaseType === 'cards') {
-                    // 1. Restar dinero al comprador
-                    await supabase.from('users').update({ balance: freshUser.balance - totalCost }).eq('user_id', userId);
+                    // EJECUCIÓN
+                    // 1. Cobrar al comprador
+                    await supabase.from('users').update({ balance: checkUser.balance - totalCost }).eq('user_id', userId);
 
-                    // 2. Procesar cada carta (Transferir + Pagar al vendedor)
-                    // Lo hacemos en bucle para pagarle a cada dueño original
-                    for (const card of cardsToBuy) {
+                    // 2. Procesar cada carta (Pagar al vendedor y Transferir)
+                    for (const card of validCards) {
                         // A. Pagar al vendedor
                         const { data: seller } = await supabase.from('users').select('balance').eq('user_id', card.user_id).single();
                         if (seller) {
@@ -241,30 +201,38 @@ module.exports = {
                             market_price: null // Ya no está en venta
                         }).eq('id', card.id);
                     }
+
+                    // --- HISTORIAL (Card Buy) ---
+                    await supabase.from('history_logs').insert({
+                        user_id: userId,
+                        action_type: 'pack_buy', // Usamos pack_buy o creamos 'card_buy', usaré 'buy' genérico si prefieres, pero pack_buy sale con icono de carrito
+                        amount: -totalCost,
+                        details: `Compró ${validCards.length} cartas en el Marketplace`
+                    });
+                    // ----------------------------
+
+                    collector.stop('success');
+                    
+                    // MENSAJE FINAL
+                    const successEmbed = new EmbedBuilder()
+                        .setColor('#2ecc71')
+                        .setTitle('✅ ¡Compra Exitosa!')
+                        .setDescription(`Has adquirido tus items por **${totalCost}** ${moneyEmoji}.\nRevisa tu inventario.`)
+                        .setTimestamp();
+
+                    await i.update({ embeds: [successEmbed], components: [] });
                 }
+            });
 
-                collector.stop('success');
-                
-                // MENSAJE FINAL
-                const successEmbed = new EmbedBuilder()
-                    .setColor('#2ecc71')
-                    .setTitle('✅ ¡Compra Exitosa!')
-                    .setDescription(`Has adquirido tus items por **${totalCost}** ${moneyEmoji}.\nRevisa tu inventario.`)
-                    .setTimestamp();
-
-                await i.update({ embeds: [successEmbed], components: [] });
-            }
-        });
-
-        collector.on('end', (_, reason) => {
-            if (reason === 'time') {
-                interaction.editReply({ content: '⏳ Tiempo agotado.', components: [] }).catch(() => {});
-            }
-        });
+            collector.on('end', (_, reason) => {
+                if (reason === 'time') {
+                    interaction.editReply({ content: '⏳ Tiempo agotado.', components: [] }).catch(() => {});
+                }
+            });
+        }
 
     } catch (err) {
         console.error('Error en buy:', err);
-        // Intentar avisar si falla
         try { await interaction.editReply({ content: '❌ Error al procesar la compra.', embeds: [], components: [] }); } catch {}
     }
   }
