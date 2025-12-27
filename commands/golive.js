@@ -14,9 +14,14 @@ const eyeEmoji = '👁️';
 
 // GIFs de Live (Usa los limpios que te pasé o agrega nuevos)
 const LIVE_GIFS = [
-    'https://media.tenor.com/2LpVedAVi88AAAAM/williamjkp-lykn-william.gif',
-    'https://media.tenor.com/dAGPE3yPe_IAAAAM/williamjkp-lykn.gif',
-    'https://media.tenor.com/Uk-Y4jTKraYAAAAM/lykn-lyknzip.gif'
+    'https://media1.tenor.com/m/-YVaVG9rilQAAAAd/william-william-jkp.gif',
+    'https://media1.tenor.com/m/hT9oMGI60yQAAAAd/williamjkp-williamjkp-kiss.gif',
+    'https://media1.tenor.com/m/1LZhP8uaTVMAAAAd/william-william-jkp.gif',
+    'https://media1.tenor.com/m/evjddzPXWiMAAAAd/williamjkp-lykn-william.gif',
+    'https://media1.tenor.com/m/Q_sgq_DeI3YAAAAd/williamest-william-jakrapatr.gif',
+    'https://media1.tenor.com/m/yQgw6waTJYgAAAAd/william-lykn-lykn.gif',
+    'https://media1.tenor.com/m/GaJ9aBWDfJYAAAAd/bye-waving.gif',
+    'https://media1.tenor.com/m/bwZtU5-lJc0AAAAd/nonglukest-william-jakrapatr.gif'
 ];
 
 // Comentarios simulados de fans
