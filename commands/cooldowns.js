@@ -5,13 +5,15 @@ const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 // --- CONFIGURACIÓN DE TIEMPOS ---
-// Deben coincidir exactamente con los que usas en los otros archivos
 const TIMES = {
     WORK: 3 * 60 * 1000,           // 3 mins
     PHOTOCARD: 5 * 60 * 1000,      // 5 mins
     DAILY: 12 * 60 * 60 * 1000,    // 12 horas
-    WEEKLY: 7 * 24 * 60 * 60 * 1000 // 7 días
-    // Alpha y Licuadora no necesitan tiempo fijo aquí porque leemos su "reset_time" directo de la DB
+    WEEKLY: 7 * 24 * 60 * 60 * 1000, // 7 días
+    // --- NUEVOS ---
+    GOLIVE: 3 * 60 * 1000,         // 3 mins (Live Stream)
+    FREESTYLE: 15 * 60 * 1000,     // 15 mins
+    WORLD_TOUR: 15 * 60 * 1000     // 15 mins
 };
 
 module.exports = {
@@ -26,71 +28,72 @@ module.exports = {
     await interaction.deferReply();
 
     try {
-      // 1. Obtener todos los datos del usuario de una sola vez
+      // 1. Obtener datos de USUARIOS (Tabla principal)
       let { data: user } = await supabase
         .from('users')
-        .select('*') // Seleccionamos todas las columnas
+        .select('*') 
         .eq('user_id', userId)
         .single();
 
-      // Si el usuario es nuevo y no tiene registro, usamos un objeto vacío (todo estará "Listo")
       if (!user) user = {};
 
+      // 2. Obtener datos de WORLD TOUR (Tabla separada)
+      // Usamos maybeSingle porque puede que el usuario no haya iniciado el tour aun
+      const { data: tour } = await supabase
+        .from('world_tours')
+        .select('last_checkin')
+        .eq('user_id', userId)
+        .maybeSingle();
+
       // --- FUNCIÓN AUXILIAR PARA FORMATEAR ESTADO ---
-      // Calcula si está listo o devuelve el timestamp relativo de Discord
       const getStatus = (lastClaimTime, duration) => {
         const last = lastClaimTime || 0;
-        // Si es 0 (nunca usado) o ya pasó el tiempo:
         if (last === 0 || (now - last) >= duration) {
           return "✅ **¡Listo!**";
         }
-        // Si falta tiempo: Calculamos cuándo estará listo en el futuro
         const readyAtUnixSeconds = Math.floor((last + duration) / 1000);
-        // Usamos el formato mágico de Discord <t:X:R> para cuenta regresiva dinámica
         return `⏳ <t:${readyAtUnixSeconds}:R>`;
       };
 
-      // --- FUNCIÓN ESPECIAL PARA ALPHA/LICUADORA (Usos Diarios) ---
-      // Estos funcionan distinto: tienen una hora de reseteo fija
+      // --- FUNCIÓN ESPECIAL PARA RESETEOS DIARIOS ---
       const getResetStatus = (resetTimeColumn, usesColumn, maxUses) => {
           const resetTime = user[resetTimeColumn] || 0;
           let uses = user[usesColumn] || 0;
 
-          // Si ya pasó la hora de reset, los usos son 0 virtualmente
           if (now > resetTime) uses = 0;
 
           if (uses < maxUses) {
-              // Aún le quedan usos disponibles ahora mismo
-              return `✅ **¡Listo!** (${maxUses - uses}/${maxUses} disponibles)`;
+              return `✅ **¡Listo!** (${maxUses - uses}/${maxUses})`;
           } else {
-              // Gastó todos los usos, mostrar tiempo para el reset
               const resetUnixSeconds = Math.floor(resetTime / 1000);
               return `⏳ Reset <t:${resetUnixSeconds}:R>`;
           }
       };
 
-
       // --- CONSTRUCCIÓN DEL EMBED ---
       const embed = new EmbedBuilder()
-        .setColor('#2b2d31') // Un color oscuro estilo Discord
+        .setColor('#2b2d31')
         .setTitle('⏱️ Tus Tiempos de Espera (Cooldowns)')
         .setDescription(`Hola <@${userId}>, este es el estado actual de tus comandos.`)
         .addFields(
-          // GRUPO 1: Economía Básica
+          // GRUPO 1: Economía & Minijuegos
           {
-            name: '💰 Economía & Suministros',
+            name: '💰 Economía & Minijuegos',
             value: [
               `💼 **Work:** ${getStatus(user.last_work_claim, TIMES.WORK)}`,
+              `🔴 **Live Stream:** ${getStatus(user.last_golive_claim, TIMES.GOLIVE)}`,
+              `🎤 **Freestyle:** ${getStatus(user.last_freestyle, TIMES.FREESTYLE)}`,
               `📅 **Daily:** ${getStatus(user.last_daily_claim, TIMES.DAILY)}`,
               `🗓️ **Weekly:** ${getStatus(user.last_weekly_claim, TIMES.WEEKLY)}`
             ].join('\n'),
             inline: false
           },
-          // GRUPO 2: Coleccionismo & Juegos
+          // GRUPO 2: Coleccionismo & Eventos
           {
-            name: '🃏 Gacha & Juegos',
+            name: '🃏 Gacha & Eventos',
             value: [
               `🎰 **Photocard:** ${getStatus(user.last_photocard_claim, TIMES.PHOTOCARD)}`,
+              `🌍 **World Tour:** ${getStatus(tour?.last_checkin, TIMES.WORLD_TOUR)}`,
               `🐺 **Project Alpha:** ${getResetStatus('alpha_reset_time', 'alpha_uses', 3)}`,
               `🌪️ **Licuadora:** ${getResetStatus('licuadora_reset_time', 'licuadora_uses', 3)}`
             ].join('\n'),
