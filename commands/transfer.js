@@ -198,7 +198,7 @@ module.exports = {
             id, 
             unique_card_id,
             rarity, 
-            base_cards!inner (name, group_name, rarity_level)
+            base_cards!inner (name, group_name, rarity_level, era)
           `)
           .eq('user_id', sender.id);
 
@@ -289,6 +289,7 @@ module.exports = {
           collector.stop('confirmed'); 
 
           // --- EJECUCIÓN ---
+          // 1. Dinero
           if (moneyAmount) {
             await supabase.from('users').update({ balance: senderMoneyData.balance - moneyAmount }).eq('user_id', sender.id);
             let { data: rData } = await supabase.from('users').select('balance').eq('user_id', receiver.id).single();
@@ -296,6 +297,7 @@ module.exports = {
             else await supabase.from('users').update({ balance: rData.balance + moneyAmount }).eq('user_id', receiver.id);
           }
 
+          // 2. Packs
           if (packToTransfer) {
              await supabase.from('user_packs').update({ quantity: packToTransfer.quantity - 1 }).eq('id', packToTransfer.id);
              const { data: existingRPack } = await supabase.from('user_packs').select('id, quantity').eq('user_id', receiver.id).eq('pack_code', packCode).single();
@@ -303,10 +305,26 @@ module.exports = {
              await supabase.from('user_packs').upsert({ user_id: receiver.id, pack_code: packCode, quantity: newQty }, { onConflict: ['user_id', 'pack_code'] });
           }
 
+          // 3. Cartas
           if (cardsToTransfer.length > 0) {
              const ids = cardsToTransfer.map(c => c.id);
              await supabase.from('user_cards').update({ user_id: receiver.id }).in('id', ids);
           }
+
+          // --- LOG HISTORIAL (AGREGADO) ---
+          // Preparamos un resumen para el log
+          let details = `Envío a ${receiver.username}: `;
+          if (moneyAmount) details += `${moneyAmount} coins. `;
+          if (packCode) details += `1 pack (${packCode}). `;
+          if (cardsToTransfer.length > 0) details += `${cardsToTransfer.length} cartas.`;
+
+          await supabase.from('history_logs').insert({
+              user_id: sender.id,
+              action_type: 'pack_trade', // Usamos 'pack_trade' para que tenga el icono de 🤝
+              target_id: receiver.id,
+              details: details.trim()
+          });
+          // ---------------------------------
 
           // --- MENSAJE FINAL ---
           const successEmbed = new EmbedBuilder()
