@@ -91,6 +91,15 @@ module.exports = {
               freestyle_notified: false 
           }).eq('user_id', userId);
 
+          // --- LOG HISTORIAL ---
+          await supabase.from('history_logs').insert({
+              user_id: userId,
+              action_type: 'freestyle',
+              amount: totalPay,
+              details: `Freestyle Session completada`
+          });
+          // ---------------------
+
           const successEmbed = new EmbedBuilder()
               .setColor('#FFD700')
               .setTitle('🔥 ¡BARRA PESADA!')
