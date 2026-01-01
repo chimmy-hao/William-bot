@@ -11,14 +11,14 @@ const REWARDS = [
     { code: 'kiwi',   count: 1, name: 'Kiwi Pack',   emoji: '<:pack_kiwi:1413292487455408201>' }
 ];
 
-// --- LISTA DE VARIACIÓN (Para dar frescura) ---
+// --- LISTA DE VARIACIÓN ---
 const weeklyGifs = [
     'https://media.tenor.com/sEWvs4aajowAAAAM/lykn-williamjkp.gif',
     'https://media.tenor.com/SkKGg1qaV7MAAAAM/lykn-williamjkp.gif',
     'https://media.tenor.com/_dCnuDEYc7MAAAAM/lykn-william-lykn.gif',
-    'https://media.tenor.com/fbX5_SKWKO4AAAAM/lyknzip-lykn.gif'
+    'https://media.tenor.com/fbX5_SKWKO4AAAAM/lyknzip-lykn.gif', // <--- FALTABA ESTA COMA AQUÍ
     'https://media.tenor.com/Nx318i7PY0QAAAAM/lykn-william-lykn.gif'
-    ];
+];
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -27,7 +27,8 @@ module.exports = {
 
   async execute(interaction) {
     const userId = interaction.user.id;
-    const now = Date.now();
+    // Usamos new Date() para manejar mejor timestamps en DB
+    const now = Date.now(); 
 
     try {
       await interaction.deferReply();
@@ -35,7 +36,8 @@ module.exports = {
       // 1. VERIFICAR COOLDOWN
       let { data: user } = await supabase.from('users').select('last_weekly_claim').eq('user_id', userId).single();
       
-      const lastUsed = user?.last_weekly_claim || 0;
+      // Convertimos a número por seguridad si viene de DB como string ISO
+      const lastUsed = user?.last_weekly_claim ? new Date(user.last_weekly_claim).getTime() : 0;
       const remaining = COOLDOWN_TIME - (now - lastUsed);
 
       if (remaining > 0) {
@@ -63,14 +65,16 @@ module.exports = {
       });
 
       // Upsert Packs
-      await supabase.from('user_packs').upsert(updates, { onConflict: 'user_id, pack_code' });
+      const { error: packError } = await supabase.from('user_packs').upsert(updates, { onConflict: 'user_id, pack_code' });
+      if (packError) throw new Error(`Error guardando packs: ${packError.message}`);
 
-      // 3. ACTUALIZAR TIEMPO + NOTIFICACIÓN + HISTORIAL
+      // 3. ACTUALIZAR TIEMPO + NOTIFICACIÓN
+      // Guardamos la fecha en formato ISO para compatibilidad con Supabase
       await supabase.from('users').upsert({
         user_id: userId,
         username: interaction.user.username,
-        last_weekly_claim: now,
-        weekly_notified: false // <--- 🔔 Recordatorio activado
+        last_weekly_claim: new Date().toISOString(), // Formato seguro
+        weekly_notified: false 
       }, { onConflict: 'user_id' });
 
       // Historial
@@ -98,20 +102,31 @@ module.exports = {
       // --- LÓGICA DE IMAGEN (MAIN vs VARIACIÓN) ---
       const filesToSend = [];
       
-      // Tiramos una moneda: 50% (0.5) de probabilidad de usar el GIF LOCAL (Main)
-      // O si la lista está vacía, forzamos el local.
+      // Tiramos una moneda: 50% probabilidad de usar el GIF LOCAL (Main)
+      // Si la lista de gifs está vacía, usamos el local obligatoriamente
       const useMainGif = Math.random() < 0.5 || weeklyGifs.length === 0;
 
+      // Variable para guardar la URL final si es remota
+      let finalImageUrl = null;
+
       if (useMainGif) {
-          // CASO MAIN: Usamos el archivo local weekly.gif
-          const file = new AttachmentBuilder('./weekly.gif');
-          embed.setImage('attachment://weekly.gif');
-          filesToSend.push(file);
-      } else {
-          // CASO VARIACIÓN: Usamos uno de la lista
-          let randomGif = weeklyGifs[Math.floor(Math.random() * weeklyGifs.length)];
+          try {
+             // CASO MAIN: Intentamos usar el archivo local
+             const file = new AttachmentBuilder('./weekly.gif');
+             embed.setImage('attachment://weekly.gif');
+             filesToSend.push(file);
+          } catch (e) {
+             console.error("No se encontró weekly.gif local, usando remoto.");
+             // Fallback si no existe el archivo local
+             finalImageUrl = weeklyGifs[0];
+          }
+      } 
+      
+      if (!useMainGif || finalImageUrl) {
+          // CASO VARIACIÓN (o fallback): Usamos uno de la lista
+          let randomGif = finalImageUrl || weeklyGifs[Math.floor(Math.random() * weeklyGifs.length)];
           
-          // Arreglo Webp -> Gif
+          // Arreglo Webp -> Gif (Discord a veces prefiere gif explícito en embeds)
           if (randomGif.includes('.webp')) {
               randomGif = randomGif.replace('.webp', '.gif');
           }
@@ -125,7 +140,7 @@ module.exports = {
       if (!interaction.deferred && !interaction.replied) {
           await interaction.reply({ content: '❌ Error interno.', ephemeral: true });
       } else {
-          await interaction.editReply('❌ Ocurrió un error al entregar tus recompensas.');
+          await interaction.editReply(`❌ Ocurrió un error: ${error.message}`);
       }
     }
   }
