@@ -110,11 +110,14 @@ async function deployCommands() {
 }
 
 // ==========================================
-// ⏰ NOTIFICACIONES INTELIGENTES
+// ⏰ NOTIFICACIONES INTELIGENTES (REMINDERS)
 // ==========================================
 const COOLDOWNS = {
-    WORK: 3 * 60 * 1000,
+    WORK: 5 * 60 * 1000,
     PHOTOCARD: 5 * 60 * 1000,
+    GOLIVE: 5 * 60 * 1000,
+    FREESTYLE: 15 * 60 * 1000,    // <--- NUEVO
+    WORLD_TOUR: 15 * 60 * 1000,   // <--- NUEVO
     DAILY: 12 * 60 * 60 * 1000,
     WEEKLY: 7 * 24 * 60 * 60 * 1000
 };
@@ -124,10 +127,12 @@ setInterval(async () => {
         if (!supabase) return; 
         const now = Date.now();
         
+        // Buscamos usuarios que tengan ALGUNA notificación pendiente (false)
+        // Agregamos 'freestyle_notified' y 'world_tour_notified' a la lista
         const { data: users, error } = await supabase
             .from('users')
             .select('*')
-            .or('work_notified.eq.false,daily_notified.eq.false,weekly_notified.eq.false,photocard_notified.eq.false,alpha_notified.eq.false,licuadora_notified.eq.false')
+            .or('work_notified.eq.false,daily_notified.eq.false,weekly_notified.eq.false,photocard_notified.eq.false,golive_notified.eq.false,freestyle_notified.eq.false,world_tour_notified.eq.false,alpha_notified.eq.false,licuadora_notified.eq.false')
             .limit(30);
 
         if (error || !users || users.length === 0) return;
@@ -139,22 +144,48 @@ setInterval(async () => {
             let messages = [];
             let shouldSend = false;
 
+            // 1. WORK
             if (user.work_notified === false && now >= (user.last_work_claim || 0) + COOLDOWNS.WORK) {
                 updates.work_notified = true;
                 if (user.pref_work !== false) { messages.push("trabajar 💼"); shouldSend = true; }
             }
+            // 2. GOLIVE
+            if (user.golive_notified === false && now >= (user.last_golive_claim || 0) + COOLDOWNS.GOLIVE) {
+                updates.golive_notified = true;
+                if (user.pref_golive !== false) { messages.push("hacer Live Stream 🔴"); shouldSend = true; }
+            }
+            // 3. FREESTYLE (Nuevo)
+            if (user.freestyle_notified === false && now >= (user.last_freestyle || 0) + COOLDOWNS.FREESTYLE) {
+                updates.freestyle_notified = true;
+                if (user.pref_freestyle !== false) { messages.push("practicar Freestyle 🎤"); shouldSend = true; }
+            }
+            // 4. PHOTOCARD
             if (user.photocard_notified === false && now >= (user.last_photocard_claim || 0) + COOLDOWNS.PHOTOCARD) {
                 updates.photocard_notified = true;
                 if (user.pref_photocard !== false) { messages.push("buscar cartas 🎰"); shouldSend = true; }
             }
+            // 5. WORLD TOUR (Nuevo - Requiere consulta extra)
+            if (user.world_tour_notified === false) {
+                // Consultamos la tabla world_tours solo si es necesario
+                const { data: tour } = await supabase.from('world_tours').select('last_checkin').eq('user_id', user.user_id).single();
+                const lastCheckin = tour?.last_checkin ? new Date(tour.last_checkin).getTime() : 0;
+                
+                if (now >= lastCheckin + COOLDOWNS.WORLD_TOUR) {
+                    updates.world_tour_notified = true;
+                    if (user.pref_world_tour !== false) { messages.push("continuar el World Tour 🌍"); shouldSend = true; }
+                }
+            }
+            // 6. DAILY
             if (user.daily_notified === false && now >= (user.last_daily_claim || 0) + COOLDOWNS.DAILY) {
                 updates.daily_notified = true;
                 if (user.pref_daily !== false) { messages.push("reclamar daily 📅"); shouldSend = true; }
             }
+            // 7. WEEKLY
             if (user.weekly_notified === false && now >= (user.last_weekly_claim || 0) + COOLDOWNS.WEEKLY) {
                 updates.weekly_notified = true;
                 if (user.pref_weekly !== false) { messages.push("reclamar pack semanal 🗓️"); shouldSend = true; }
             }
+            // 8. ALPHA & LICUADORA (Reset fijo)
             if (user.alpha_notified === false && now >= (user.alpha_reset_time || 0)) {
                 updates.alpha_notified = true;
                 if (user.pref_alpha !== false) { messages.push("intentar Proyecto Alpha 🐺"); shouldSend = true; }
@@ -164,13 +195,19 @@ setInterval(async () => {
                 if (user.pref_licuadora !== false) { messages.push("usar la Licuadora 🌪️"); shouldSend = true; }
             }
 
+            // ENVIAR NOTIFICACIÓN
             if (Object.keys(updates).length > 0) {
                 if (shouldSend && messages.length > 0) {
                     const channel = await client.channels.fetch(user.last_channel_id).catch(() => null);
                     if (channel) {
-                        await channel.send(`Hey <@${user.user_id}>, William ya está listo para **${messages.join(' y para ')}**!`).catch(() => {});
+                        const actionText = messages.length > 1 
+                            ? messages.slice(0, -1).join(', ') + ' y ' + messages.slice(-1) 
+                            : messages[0];
+
+                        await channel.send(`Hey <@${user.user_id}>, William ya está listo para **${actionText}**!`).catch(() => {});
                     }
                 }
+                // Guardar cambios en DB para no repetir
                 await supabase.from('users').update(updates).eq('user_id', user.user_id);
             }
         }
@@ -237,7 +274,6 @@ if (!token) {
     console.error("No se encontró la variable DISCORD_TOKEN en el entorno.");
     console.error("Asegúrate de agregarla en la pestaña 'Environment' de Render.");
 } else {
-    // ⚠️ Ya NO imprimimos el token aquí para evitar que Discord lo bloquee.
     console.log(`✅ Token variable detectada. Iniciando conexión...`);
     
     client.login(token)
