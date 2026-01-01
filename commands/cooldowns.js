@@ -6,14 +6,15 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANO
 
 // --- CONFIGURACIÓN DE TIEMPOS ---
 const TIMES = {
-    WORK: 3 * 60 * 1000,           // 3 mins
-    PHOTOCARD: 5 * 60 * 1000,      // 5 mins
-    DAILY: 12 * 60 * 60 * 1000,    // 12 horas
+    WORK: 5 * 60 * 1000,             // <--- ACTUALIZADO A 5 MINS
+    PHOTOCARD: 5 * 60 * 1000,        // 5 mins
+    DAILY: 12 * 60 * 60 * 1000,      // 12 horas
     WEEKLY: 7 * 24 * 60 * 60 * 1000, // 7 días
-    // --- NUEVOS ---
-    GOLIVE: 3 * 60 * 1000,         // 3 mins (Live Stream)
-    FREESTYLE: 15 * 60 * 1000,     // 15 mins
-    WORLD_TOUR: 15 * 60 * 1000     // 15 mins
+    
+    // --- MINIJUEGOS ---
+    GOLIVE: 5 * 60 * 1000,           // <--- ACTUALIZADO A 5 MINS
+    FREESTYLE: 15 * 60 * 1000,       // 15 mins
+    WORLD_TOUR: 15 * 60 * 1000       // 15 mins
 };
 
 module.exports = {
@@ -46,20 +47,26 @@ module.exports = {
         .maybeSingle();
 
       // --- FUNCIÓN AUXILIAR PARA FORMATEAR ESTADO ---
+      // Calcula si está listo o cuánto falta
       const getStatus = (lastClaimTime, duration) => {
-        const last = lastClaimTime || 0;
+        // Convertimos a número por seguridad (si viene como string de la DB)
+        const last = lastClaimTime ? new Date(lastClaimTime).getTime() : 0;
+        
         if (last === 0 || (now - last) >= duration) {
           return "✅ **¡Listo!**";
         }
+        
+        // Calculamos el timestamp futuro para Discord <t:timestamp:R>
         const readyAtUnixSeconds = Math.floor((last + duration) / 1000);
         return `⏳ <t:${readyAtUnixSeconds}:R>`;
       };
 
-      // --- FUNCIÓN ESPECIAL PARA RESETEOS DIARIOS ---
+      // --- FUNCIÓN ESPECIAL PARA RESETEOS DIARIOS (Project Alpha / Licuadora) ---
       const getResetStatus = (resetTimeColumn, usesColumn, maxUses) => {
-          const resetTime = user[resetTimeColumn] || 0;
+          const resetTime = user[resetTimeColumn] ? new Date(user[resetTimeColumn]).getTime() : 0;
           let uses = user[usesColumn] || 0;
 
+          // Si ya pasó la hora de reset, los usos son 0 virtualmente
           if (now > resetTime) uses = 0;
 
           if (uses < maxUses) {
