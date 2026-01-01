@@ -14,8 +14,8 @@ const supabase = createClient(
 );
 
 // --- CONFIGURACIÓN DE EMOJIS ---
-const ownedEmoji = '<:strawberrity:1411384728119939182>'; // Fresa normal (La tienes)
-const missingEmoji = '<:strawberritymissing:1441239270626164847>'; // Fresa gris (Te falta)
+const ownedEmoji = '<:strawberrity:1411384728119939182>'; 
+const missingEmoji = '<:strawberritymissing:1441239270626164847>'; 
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -28,7 +28,7 @@ module.exports = {
     )
     .addStringOption(opt =>
       opt.setName('group')
-        .setDescription('Filtrar por grupo (Recomendado)')
+        .setDescription('Filtrar por grupo')
         .setRequired(false)
         .setAutocomplete(true)
     )
@@ -60,14 +60,12 @@ module.exports = {
   async execute(interaction) {
     const targetUser = interaction.options.getUser('user') || interaction.user;
     const userId = targetUser.id;
-    // Agregamos .trim() para seguridad
     const groupFilter = interaction.options.getString('group')?.trim();
     const idolFilter = interaction.options.getString('idol')?.trim();
 
-    // Validación: Pedir al menos un filtro
     if (!groupFilter && !idolFilter) {
       return interaction.reply({ 
-        content: '⚠️ Por favor, selecciona al menos un **Grupo** o un **Idol** para generar la checklist.', 
+        content: '⚠️ Por favor, selecciona al menos un **Grupo** o un **Idol**.', 
         ephemeral: true 
       });
     }
@@ -75,7 +73,7 @@ module.exports = {
     try {
       await interaction.deferReply();
 
-      // 1. Obtener TODAS las cartas base (Lo que EXISTE)
+      // 1. OBTENER DATOS
       let baseQuery = supabase
         .from('base_cards')
         .select('id, name, group_name, era, rarity_level')
@@ -85,12 +83,8 @@ module.exports = {
       if (idolFilter) baseQuery = baseQuery.ilike('name', `%${idolFilter}%`);
 
       const { data: allCards, error: baseError } = await baseQuery;
+      if (baseError || !allCards || allCards.length === 0) return interaction.editReply('❌ No se encontraron cartas.');
 
-      if (baseError || !allCards || allCards.length === 0) {
-        return interaction.editReply('❌ No se encontraron cartas con esos filtros.');
-      }
-
-      // 2. Obtener las cartas que TIENE el usuario
       const baseIds = allCards.map(c => c.id);
       const { data: ownedCards, error: ownedError } = await supabase
         .from('user_cards')
@@ -98,153 +92,134 @@ module.exports = {
         .eq('user_id', userId)
         .in('card_id', baseIds);
 
-      if (ownedError) {
-        console.error(ownedError);
-        return interaction.editReply('❌ Error al consultar tu colección.');
-      }
+      if (ownedError) return interaction.editReply('❌ Error al consultar colección.');
 
-      // "new Set" elimina duplicados. ownedSet.size es la cantidad de cartas ÚNICAS que tienes.
       const ownedSet = new Set(ownedCards.map(uc => uc.card_id));
 
-      // 3. PROCESAR DATOS
+      // 2. PROCESAR Y AGRUPAR
       const dataMap = {};
-
       allCards.forEach(card => {
-        const era = card.era || 'Unknown Era';
+        const era = card.era || 'Unknown';
         const cleanName = card.name.split(' — ')[0].trim();
         const rarity = card.rarity_level || 1;
 
         if (!dataMap[era]) dataMap[era] = {};
         if (!dataMap[era][cleanName]) dataMap[era][cleanName] = { 1: false, 2: false, 3: false };
-
-        if (ownedSet.has(card.id)) {
-          dataMap[era][cleanName][rarity] = true;
-        }
+        if (ownedSet.has(card.id)) dataMap[era][cleanName][rarity] = true;
       });
 
-      // --- INICIO LÓGICA DE PAGINACIÓN ---
-      
-      // Convertimos el mapa de eras en un array para poder paginarlo
       const erasArray = Object.entries(dataMap);
       
+      // --- LÓGICA DE PAGINACIÓN MEJORADA ---
       let page = 0;
-      const erasPerPage = 10; // 10 Eras completas por página
+      // Reduje a 6 eras por página para tener espacio si alguna se divide en 2 partes
+      const erasPerPage = 6; 
 
-      // Función para generar el Embed según la página
       const generateEmbed = (pageIndex) => {
         const embed = new EmbedBuilder()
             .setColor('#ff9ff3')
-            .setAuthor({ 
-            name: `Checklist de ${targetUser.username}`, 
-            iconURL: targetUser.displayAvatarURL() 
-            })
+            .setAuthor({ name: `Checklist de ${targetUser.username}`, iconURL: targetUser.displayAvatarURL() })
             .setTimestamp();
 
         if (groupFilter) embed.setTitle(`📂 Checklist: ${groupFilter}`);
         else if (idolFilter) embed.setTitle(`👤 Checklist: ${idolFilter}`);
 
-        // Cortamos el array de Eras según la página actual
         const start = pageIndex * erasPerPage;
         const end = start + erasPerPage;
         const currentEras = erasArray.slice(start, end);
 
-        // Agregamos los campos (fields)
         currentEras.forEach(([era, idols]) => {
-            const lines = [];
+            const allLines = [];
             for (const [idolName, rarities] of Object.entries(idols)) {
                 const r1 = rarities[1] ? ownedEmoji : missingEmoji;
                 const r2 = rarities[2] ? ownedEmoji : missingEmoji;
                 const r3 = rarities[3] ? ownedEmoji : missingEmoji;
-                lines.push(`${r1}${r2}${r3} **${idolName}**`);
+                allLines.push(`${r1}${r2}${r3} **${idolName}**`);
             }
 
-            // Unimos líneas
-            let fieldValue = lines.join('\n');
+            // --- DIVISIÓN DE CAMPOS SI SUPERA EL LÍMITE DE DISCORD (1024 chars) ---
+            // Un emoji mide ~40 chars. 3 emojis + nombre ~150 chars.
+            // 1024 chars / 150 = ~6 líneas antes de romperse.
             
-            // Protección básica por si una sola Era es gigante (más de 1024 caracteres)
-            if (fieldValue.length > 1024) {
-                fieldValue = fieldValue.substring(0, 1000) + '... (cortado)';
-            }
+            const MAX_CHARS = 1000;
+            let currentField = '';
+            let part = 1;
 
-            if (lines.length > 0) {
+            for (let i = 0; i < allLines.length; i++) {
+                const line = allLines[i] + '\n';
+                
+                // Si sumar la línea actual supera el límite, guardamos el campo y empezamos uno nuevo
+                if (currentField.length + line.length > MAX_CHARS) {
+                    embed.addFields({
+                        name: part === 1 ? `💿 Era: ${era}` : `💿 Era: ${era} (Cont.)`,
+                        value: currentField,
+                        inline: false
+                    });
+                    currentField = line;
+                    part++;
+                } else {
+                    currentField += line;
+                }
+            }
+            
+            // Agregar el último trozo que quedó pendiente
+            if (currentField.length > 0) {
                 embed.addFields({
-                    name: `💿 Era: ${era}`,
-                    value: fieldValue,
+                    name: part === 1 ? `💿 Era: ${era}` : `💿 Era: ${era} (Cont.)`,
+                    value: currentField,
                     inline: false
                 });
             }
         });
 
-        // Cálculo del progreso (Pie de página)
         const totalSlots = allCards.length;
         const filledSlots = ownedSet.size;
         const percent = Math.round((filledSlots / totalSlots) * 100);
         const totalPages = Math.ceil(erasArray.length / erasPerPage);
 
-        embed.setFooter({ 
-            text: `Página ${pageIndex + 1}/${totalPages} • Progreso Total: ${percent}% (${filledSlots}/${totalSlots})` 
-        });
-
+        embed.setFooter({ text: `Página ${pageIndex + 1}/${totalPages} • Progreso: ${percent}%` });
         return embed;
       };
 
-      // Función para generar los botones
-      const generateRow = (pageIndex) => {
-        const totalPages = Math.ceil(erasArray.length / erasPerPage);
-        const row = new ActionRowBuilder();
-        
-        row.addComponents(
-            new ButtonBuilder()
-                .setCustomId('prev_checklist')
-                .setLabel('⬅️ Anterior')
-                .setStyle(ButtonStyle.Primary)
-                .setDisabled(pageIndex === 0),
-            new ButtonBuilder()
-                .setCustomId('next_checklist')
-                .setLabel('Siguiente ➡️')
-                .setStyle(ButtonStyle.Primary)
-                .setDisabled(pageIndex >= totalPages - 1)
-        );
-        return row;
+      const generateButtons = (idx) => {
+          const totalPages = Math.ceil(erasArray.length / erasPerPage);
+          const row = new ActionRowBuilder();
+          row.addComponents(
+              new ButtonBuilder().setCustomId('prev').setLabel('⬅️').setStyle(ButtonStyle.Primary).setDisabled(idx === 0),
+              new ButtonBuilder().setCustomId('next').setLabel('➡️').setStyle(ButtonStyle.Primary).setDisabled(idx >= totalPages - 1)
+          );
+          return row;
       };
 
-      // Enviar mensaje inicial
-      const message = await interaction.editReply({ 
-          embeds: [generateEmbed(page)],
-          components: erasArray.length > erasPerPage ? [generateRow(page)] : []
+      const msg = await interaction.editReply({ 
+          embeds: [generateEmbed(page)], 
+          components: erasArray.length > erasPerPage ? [generateButtons(page)] : [] 
       });
 
-      // Si no hay más páginas, terminamos aquí
       if (erasArray.length <= erasPerPage) return;
 
-      // Collector de botones
-      const collector = message.createMessageComponentCollector({
-        time: 120000, // 2 minutos
-        filter: i => i.user.id === interaction.user.id
+      const collector = msg.createMessageComponentCollector({
+          time: 120000,
+          filter: i => i.user.id === interaction.user.id
       });
 
       collector.on('collect', async i => {
-        if (i.customId === 'prev_checklist') page--;
-        if (i.customId === 'next_checklist') page++;
-
-        await i.update({
-            embeds: [generateEmbed(page)],
-            components: [generateRow(page)]
-        });
+          if (i.customId === 'prev') page--;
+          if (i.customId === 'next') page++;
+          await i.update({ embeds: [generateEmbed(page)], components: [generateButtons(page)] });
       });
 
       collector.on('end', async () => {
-        // Desactivar botones al terminar
-        try {
-            const disabledRow = generateRow(page);
-            disabledRow.components.forEach(btn => btn.setDisabled(true));
-            await message.edit({ components: [disabledRow] });
-        } catch (e) {}
+          try {
+              const row = generateButtons(page);
+              row.components.forEach(b => b.setDisabled(true));
+              await msg.edit({ components: [row] });
+          } catch (e) {}
       });
 
     } catch (err) {
-      console.error('Error en checklist:', err);
-      if (!interaction.replied) await interaction.editReply('❌ Ocurrió un error al generar la checklist.');
+      console.error(err);
+      if (!interaction.replied) await interaction.editReply('❌ Error interno.');
     }
   }
 };
