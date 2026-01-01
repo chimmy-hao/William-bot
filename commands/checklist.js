@@ -60,7 +60,7 @@ module.exports = {
   async execute(interaction) {
     const targetUser = interaction.options.getUser('user') || interaction.user;
     const userId = targetUser.id;
-    // Agregamos .trim() para seguridad con los espacios en nombres de grupos
+    // Agregamos .trim() para seguridad
     const groupFilter = interaction.options.getString('group')?.trim();
     const idolFilter = interaction.options.getString('idol')?.trim();
 
@@ -124,11 +124,11 @@ module.exports = {
 
       // --- INICIO LÓGICA DE PAGINACIÓN ---
       
-      // Convertimos el mapa de eras en un array para poder paginarlo [[EraName, {idols...}], ...]
+      // Convertimos el mapa de eras en un array para poder paginarlo
       const erasArray = Object.entries(dataMap);
       
       let page = 0;
-      const erasPerPage = 10; // Cantidad de Eras por página
+      const erasPerPage = 10; // 10 Eras completas por página
 
       // Función para generar el Embed según la página
       const generateEmbed = (pageIndex) => {
@@ -158,8 +158,10 @@ module.exports = {
                 lines.push(`${r1}${r2}${r3} **${idolName}**`);
             }
 
-            // Unimos líneas y protegemos contra límites de Discord (1024 chars por field)
+            // Unimos líneas
             let fieldValue = lines.join('\n');
+            
+            // Protección básica por si una sola Era es gigante (más de 1024 caracteres)
             if (fieldValue.length > 1024) {
                 fieldValue = fieldValue.substring(0, 1000) + '... (cortado)';
             }
@@ -180,7 +182,7 @@ module.exports = {
         const totalPages = Math.ceil(erasArray.length / erasPerPage);
 
         embed.setFooter({ 
-            text: `Página ${pageIndex + 1}/${totalPages} • Progreso: ${percent}% (${filledSlots}/${totalSlots})` 
+            text: `Página ${pageIndex + 1}/${totalPages} • Progreso Total: ${percent}% (${filledSlots}/${totalSlots})` 
         });
 
         return embed;
@@ -193,12 +195,12 @@ module.exports = {
         
         row.addComponents(
             new ButtonBuilder()
-                .setCustomId('prev_page')
+                .setCustomId('prev_checklist')
                 .setLabel('⬅️ Anterior')
                 .setStyle(ButtonStyle.Primary)
                 .setDisabled(pageIndex === 0),
             new ButtonBuilder()
-                .setCustomId('next_page')
+                .setCustomId('next_checklist')
                 .setLabel('Siguiente ➡️')
                 .setStyle(ButtonStyle.Primary)
                 .setDisabled(pageIndex >= totalPages - 1)
@@ -222,8 +224,8 @@ module.exports = {
       });
 
       collector.on('collect', async i => {
-        if (i.customId === 'prev_page') page--;
-        if (i.customId === 'next_page') page++;
+        if (i.customId === 'prev_checklist') page--;
+        if (i.customId === 'next_checklist') page++;
 
         await i.update({
             embeds: [generateEmbed(page)],
@@ -242,7 +244,7 @@ module.exports = {
 
     } catch (err) {
       console.error('Error en checklist:', err);
-      await interaction.editReply('❌ Ocurrió un error al generar la checklist.');
+      if (!interaction.replied) await interaction.editReply('❌ Ocurrió un error al generar la checklist.');
     }
   }
 };
