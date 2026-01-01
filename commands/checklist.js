@@ -110,10 +110,9 @@ module.exports = {
 
       const erasArray = Object.entries(dataMap);
       
-      // --- LÓGICA DE PAGINACIÓN MEJORADA ---
+      // --- LÓGICA DE PAGINACIÓN ---
       let page = 0;
-      // Reduje a 6 eras por página para tener espacio si alguna se divide en 2 partes
-      const erasPerPage = 6; 
+      const erasPerPage = 5; // Bajamos a 5 eras por página para dar espacio a las divisiones invisibles
 
       const generateEmbed = (pageIndex) => {
         const embed = new EmbedBuilder()
@@ -137,35 +136,36 @@ module.exports = {
                 allLines.push(`${r1}${r2}${r3} **${idolName}**`);
             }
 
-            // --- DIVISIÓN DE CAMPOS SI SUPERA EL LÍMITE DE DISCORD (1024 chars) ---
-            // Un emoji mide ~40 chars. 3 emojis + nombre ~150 chars.
-            // 1024 chars / 150 = ~6 líneas antes de romperse.
+            // --- LÓGICA DE DIVISIÓN INVISIBLE ---
+            // Discord solo permite 1024 caracteres por campo.
+            // Si nos pasamos, creamos un segundo campo con título INVISIBLE ('\u200b')
+            // para que visualmente parezca una lista continua.
             
             const MAX_CHARS = 1000;
             let currentField = '';
-            let part = 1;
+            let isFirstPart = true;
 
             for (let i = 0; i < allLines.length; i++) {
                 const line = allLines[i] + '\n';
                 
-                // Si sumar la línea actual supera el límite, guardamos el campo y empezamos uno nuevo
                 if (currentField.length + line.length > MAX_CHARS) {
+                    // Agregamos la parte llena
                     embed.addFields({
-                        name: part === 1 ? `💿 Era: ${era}` : `💿 Era: ${era} (Cont.)`,
+                        name: isFirstPart ? `💿 Era: ${era}` : '\u200b', // Truco invisible
                         value: currentField,
                         inline: false
                     });
                     currentField = line;
-                    part++;
+                    isFirstPart = false;
                 } else {
                     currentField += line;
                 }
             }
             
-            // Agregar el último trozo que quedó pendiente
+            // Agregar lo que sobró
             if (currentField.length > 0) {
                 embed.addFields({
-                    name: part === 1 ? `💿 Era: ${era}` : `💿 Era: ${era} (Cont.)`,
+                    name: isFirstPart ? `💿 Era: ${era}` : '\u200b', // Truco invisible
                     value: currentField,
                     inline: false
                 });
@@ -177,7 +177,7 @@ module.exports = {
         const percent = Math.round((filledSlots / totalSlots) * 100);
         const totalPages = Math.ceil(erasArray.length / erasPerPage);
 
-        embed.setFooter({ text: `Página ${pageIndex + 1}/${totalPages} • Progreso: ${percent}%` });
+        embed.setFooter({ text: `Página ${pageIndex + 1}/${totalPages} • Progreso Total: ${percent}% (${filledSlots}/${totalSlots})` });
         return embed;
       };
 
