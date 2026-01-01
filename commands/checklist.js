@@ -1,4 +1,11 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { 
+  SlashCommandBuilder, 
+  EmbedBuilder, 
+  ActionRowBuilder, 
+  ButtonBuilder, 
+  ButtonStyle 
+} = require('discord.js');
+
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(
@@ -53,8 +60,9 @@ module.exports = {
   async execute(interaction) {
     const targetUser = interaction.options.getUser('user') || interaction.user;
     const userId = targetUser.id;
-    const groupFilter = interaction.options.getString('group');
-    const idolFilter = interaction.options.getString('idol');
+    // Agregamos .trim() para seguridad con los espacios en nombres de grupos
+    const groupFilter = interaction.options.getString('group')?.trim();
+    const idolFilter = interaction.options.getString('idol')?.trim();
 
     // Validación: Pedir al menos un filtro
     if (!groupFilter && !idolFilter) {
@@ -114,51 +122,123 @@ module.exports = {
         }
       });
 
-      // 4. CONSTRUIR EL EMBED
-      const embed = new EmbedBuilder()
-        .setColor('#ff9ff3')
-        .setAuthor({ 
-          name: `Checklist de ${targetUser.username}`, 
-          iconURL: targetUser.displayAvatarURL() 
-        })
-        .setTimestamp();
+      // --- INICIO LÓGICA DE PAGINACIÓN ---
+      
+      // Convertimos el mapa de eras en un array para poder paginarlo [[EraName, {idols...}], ...]
+      const erasArray = Object.entries(dataMap);
+      
+      let page = 0;
+      const erasPerPage = 10; // Cantidad de Eras por página
 
-      if (groupFilter) embed.setTitle(`📂 Checklist: ${groupFilter}`);
-      else if (idolFilter) embed.setTitle(`👤 Checklist: ${idolFilter}`);
+      // Función para generar el Embed según la página
+      const generateEmbed = (pageIndex) => {
+        const embed = new EmbedBuilder()
+            .setColor('#ff9ff3')
+            .setAuthor({ 
+            name: `Checklist de ${targetUser.username}`, 
+            iconURL: targetUser.displayAvatarURL() 
+            })
+            .setTimestamp();
 
-      let fieldCount = 0;
-      for (const [era, idols] of Object.entries(dataMap)) {
-        if (fieldCount >= 25) break; 
+        if (groupFilter) embed.setTitle(`📂 Checklist: ${groupFilter}`);
+        else if (idolFilter) embed.setTitle(`👤 Checklist: ${idolFilter}`);
 
-        const lines = [];
-        for (const [idolName, rarities] of Object.entries(idols)) {
-          const r1 = rarities[1] ? ownedEmoji : missingEmoji;
-          const r2 = rarities[2] ? ownedEmoji : missingEmoji;
-          const r3 = rarities[3] ? ownedEmoji : missingEmoji;
+        // Cortamos el array de Eras según la página actual
+        const start = pageIndex * erasPerPage;
+        const end = start + erasPerPage;
+        const currentEras = erasArray.slice(start, end);
 
-          lines.push(`${r1}${r2}${r3} **${idolName}**`);
-        }
+        // Agregamos los campos (fields)
+        currentEras.forEach(([era, idols]) => {
+            const lines = [];
+            for (const [idolName, rarities] of Object.entries(idols)) {
+                const r1 = rarities[1] ? ownedEmoji : missingEmoji;
+                const r2 = rarities[2] ? ownedEmoji : missingEmoji;
+                const r3 = rarities[3] ? ownedEmoji : missingEmoji;
+                lines.push(`${r1}${r2}${r3} **${idolName}**`);
+            }
 
-        if (lines.length > 0) {
-          embed.addFields({
-            name: `💿 Era: ${era}`,
-            value: lines.join('\n'),
-            inline: false
-          });
-          fieldCount++;
-        }
-      }
+            // Unimos líneas y protegemos contra límites de Discord (1024 chars por field)
+            let fieldValue = lines.join('\n');
+            if (fieldValue.length > 1024) {
+                fieldValue = fieldValue.substring(0, 1000) + '... (cortado)';
+            }
 
-      // 5. CÁLCULO DEL PROGRESO (Sin duplicados)
-      const totalSlots = allCards.length; // Total de huecos en el álbum
-      const filledSlots = ownedSet.size; // Total de huecos llenos (únicos)
-      const percent = Math.round((filledSlots / totalSlots) * 100);
+            if (lines.length > 0) {
+                embed.addFields({
+                    name: `💿 Era: ${era}`,
+                    value: fieldValue,
+                    inline: false
+                });
+            }
+        });
 
-      embed.setFooter({ 
-        text: `Progreso: ${percent}%` 
+        // Cálculo del progreso (Pie de página)
+        const totalSlots = allCards.length;
+        const filledSlots = ownedSet.size;
+        const percent = Math.round((filledSlots / totalSlots) * 100);
+        const totalPages = Math.ceil(erasArray.length / erasPerPage);
+
+        embed.setFooter({ 
+            text: `Página ${pageIndex + 1}/${totalPages} • Progreso: ${percent}% (${filledSlots}/${totalSlots})` 
+        });
+
+        return embed;
+      };
+
+      // Función para generar los botones
+      const generateRow = (pageIndex) => {
+        const totalPages = Math.ceil(erasArray.length / erasPerPage);
+        const row = new ActionRowBuilder();
+        
+        row.addComponents(
+            new ButtonBuilder()
+                .setCustomId('prev_page')
+                .setLabel('⬅️ Anterior')
+                .setStyle(ButtonStyle.Primary)
+                .setDisabled(pageIndex === 0),
+            new ButtonBuilder()
+                .setCustomId('next_page')
+                .setLabel('Siguiente ➡️')
+                .setStyle(ButtonStyle.Primary)
+                .setDisabled(pageIndex >= totalPages - 1)
+        );
+        return row;
+      };
+
+      // Enviar mensaje inicial
+      const message = await interaction.editReply({ 
+          embeds: [generateEmbed(page)],
+          components: erasArray.length > erasPerPage ? [generateRow(page)] : []
       });
 
-      await interaction.editReply({ embeds: [embed] });
+      // Si no hay más páginas, terminamos aquí
+      if (erasArray.length <= erasPerPage) return;
+
+      // Collector de botones
+      const collector = message.createMessageComponentCollector({
+        time: 120000, // 2 minutos
+        filter: i => i.user.id === interaction.user.id
+      });
+
+      collector.on('collect', async i => {
+        if (i.customId === 'prev_page') page--;
+        if (i.customId === 'next_page') page++;
+
+        await i.update({
+            embeds: [generateEmbed(page)],
+            components: [generateRow(page)]
+        });
+      });
+
+      collector.on('end', async () => {
+        // Desactivar botones al terminar
+        try {
+            const disabledRow = generateRow(page);
+            disabledRow.components.forEach(btn => btn.setDisabled(true));
+            await message.edit({ components: [disabledRow] });
+        } catch (e) {}
+      });
 
     } catch (err) {
       console.error('Error en checklist:', err);
