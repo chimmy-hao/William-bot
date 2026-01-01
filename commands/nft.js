@@ -4,7 +4,7 @@ const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 // CONFIGURACIÓN
-const nftEmoji = '<:nft:1441792691787792566>'; 
+const nftEmoji = '<:nft:1456378008826019973>'; 
 
 module.exports = {
   data: new SlashCommandBuilder()
