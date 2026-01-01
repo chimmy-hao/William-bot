@@ -8,11 +8,13 @@ const COOLDOWN_MINUTES = 3;
 const COOLDOWN_TIME = COOLDOWN_MINUTES * 60 * 1000; 
 
 // Emojis
-const strawberryEmoji = '<:berrycoin:1411737957081288724>'; // Tu emoji de moneda
+const strawberryEmoji = '<:berrycoin:1411737957081288724>'; 
 const liveEmoji = '🔴';
 const eyeEmoji = '👁️';
 
-// GIFs de Live (Usa los limpios que te pasé o agrega nuevos)
+// GIFs de Live 
+// (Nota: Discord prefiere enlaces que terminen en .gif puros. Los de Tenor 'media1' suelen funcionar, 
+// pero si fallan, intenta buscar el enlace directo haciendo click derecho -> Copiar dirección de imagen)
 const LIVE_GIFS = [
     'https://media1.tenor.com/m/-YVaVG9rilQAAAAd/william-william-jkp.gif',
     'https://media1.tenor.com/m/hT9oMGI60yQAAAAd/williamjkp-williamjkp-kiss.gif',
@@ -24,7 +26,6 @@ const LIVE_GIFS = [
     'https://media1.tenor.com/m/bwZtU5-lJc0AAAAd/nonglukest-william-jakrapatr.gif'
 ];
 
-// Comentarios simulados de fans
 const FAN_COMMENTS = [
     '¡Qué guapo estás hoy! 😍',
     'NOTICE ME PLS 🔥',
@@ -32,7 +33,8 @@ const FAN_COMMENTS = [
     '¡Canta un poco por favor! 🎤',
     'Saluda a Argentina 🇦🇷',
     'Oppa saranghae 🫰',
-    '¡Ese outfit te queda increíble! ✨'
+    '¡Ese outfit te queda increíble! ✨',
+    '¿Cuándo sale el próximo MV? 🎬'
 ];
 
 // Función para esperar (sleep)
@@ -52,12 +54,11 @@ module.exports = {
       let { data: user } = await supabase.from('users').select('*').eq('user_id', userId).single();
       
       if (!user) {
-          // Crear usuario si no existe
           const { data: newUser } = await supabase.from('users').insert({ user_id: userId, username: interaction.user.username }).select().single();
           user = newUser;
       }
 
-      const lastUsed = user.last_golive_claim || 0;
+      const lastUsed = user.last_golive_claim || 0; // Aseguramos que sea número
       const remaining = COOLDOWN_TIME - (now - lastUsed);
 
       if (remaining > 0) {
@@ -69,32 +70,34 @@ module.exports = {
         });
       }
 
-      // IMPORTANTE: DeferReply permite editar el mensaje varias veces para la animación
       await interaction.deferReply();
 
       // Variables de la simulación
-      let viewers = 300 + Math.floor(Math.random() * 200); // Empieza con ~300
+      let viewers = 300 + Math.floor(Math.random() * 200); 
       let earnings = 0;
-      const gif = LIVE_GIFS[Math.floor(Math.random() * LIVE_GIFS.length)];
+      
+      // Seleccionamos GIF y limpiamos espacios por si acaso
+      const rawGif = LIVE_GIFS[Math.floor(Math.random() * LIVE_GIFS.length)];
+      const gif = rawGif.trim(); 
 
       // --- FASE 1: INICIO (0s) ---
       const embed = new EmbedBuilder()
-        .setColor('#FF0000') // Rojo LIVE
+        .setColor('#FF0000') 
         .setTitle(`${liveEmoji} INSTAGRAM LIVE | ${eyeEmoji} ${viewers} viewers`)
         .setDescription(
             `**@william.jkp** ha iniciado un video en vivo.\n\n` +
             `👋 "¡Hola a todos! Tenía un rato libre antes del ensayo..."\n\n` +
             `💰 **Ganancia:** ${earnings} ${strawberryEmoji}`
         )
-        .setImage(gif)
+        .setImage(gif) // <--- IMAGEN INICIAL
         .setFooter({ text: '🔴 Transmitiendo...' });
 
       await interaction.editReply({ embeds: [embed] });
-      await wait(4000); // Espera 4 segundos
+      await wait(4000); 
 
       // --- FASE 2: INTERACCIÓN (4s) ---
-      viewers += Math.floor(Math.random() * 1000) + 500; // Suben viewers
-      const gift1 = Math.floor(Math.random() * 100) + 50; // Regalo pequeño
+      viewers += Math.floor(Math.random() * 1000) + 500;
+      const gift1 = Math.floor(Math.random() * 100) + 50; 
       earnings += gift1;
       const comment1 = FAN_COMMENTS[Math.floor(Math.random() * FAN_COMMENTS.length)];
 
@@ -105,13 +108,14 @@ module.exports = {
         `💰 **Ganancia:** ${earnings} ${strawberryEmoji}`
       );
       embed.setTitle(`${liveEmoji} INSTAGRAM LIVE | ${eyeEmoji} ${viewers.toLocaleString()} viewers`);
+      embed.setImage(gif); // <--- REAFIRMAMOS LA IMAGEN AQUÍ
       
       await interaction.editReply({ embeds: [embed] });
       await wait(4000); 
 
       // --- FASE 3: CLÍMAX (8s) ---
-      viewers += Math.floor(Math.random() * 2000) + 1000; // Muchos viewers
-      const gift2 = Math.floor(Math.random() * 300) + 150; // Regalo grande
+      viewers += Math.floor(Math.random() * 2000) + 1000;
+      const gift2 = Math.floor(Math.random() * 300) + 150; 
       earnings += gift2;
       const comment2 = FAN_COMMENTS[Math.floor(Math.random() * FAN_COMMENTS.length)];
 
@@ -123,30 +127,28 @@ module.exports = {
         `💰 **Ganancia:** ${earnings} ${strawberryEmoji}`
       );
       embed.setTitle(`${liveEmoji} INSTAGRAM LIVE | ${eyeEmoji} ${viewers.toLocaleString()} viewers`);
+      embed.setImage(gif); // <--- REAFIRMAMOS LA IMAGEN OTRA VEZ
 
       await interaction.editReply({ embeds: [embed] });
       await wait(4000);
 
       // --- FASE FINAL: CIERRE Y GUARDADO (12s) ---
-      // Guardar en DB
       const totalBalance = (user.balance || 0) + earnings;
       
       await supabase.from('users').update({ 
           balance: totalBalance,
           last_golive_claim: Date.now(),
-          golive_notified: false // <--- Activa el Reminder para dentro de 3 min
+          golive_notified: false 
       }).eq('user_id', userId);
 
-      // --- LOG HISTORIAL ---
       await supabase.from('history_logs').insert({
           user_id: userId,
           action_type: 'golive',
           amount: earnings,
           details: `Live Stream finalizado con ${viewers.toLocaleString()} viewers`
       });
-      // ---------------------
 
-      embed.setColor('#2b2d31') // Color gris (apagado)
+      embed.setColor('#2b2d31') // Gris apagado
       embed.setTitle(`⚫ LIVE FINALIZADO | Resumen`)
       embed.setDescription(
           `👋 "¡Me tengo que ir, el manager me llama! Bye bye~"\n\n` +
@@ -155,16 +157,17 @@ module.exports = {
           `🍓 **Total recaudado:** **${earnings}** ${strawberryEmoji}\n\n` +
           `⏰ *Podrás hacer otro live en 3 minutos.*`
       );
+      embed.setImage(gif); // <--- MANTENEMOS EL GIF AL FINAL (Si quieres quitarlo pon null)
       embed.setFooter({ text: 'Live finalizado' });
 
       await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
       console.error('Error en golive:', error);
-      // Si falla a mitad, intentamos avisar
-      try {
-        await interaction.editReply({ content: '❌ Se cortó la conexión del Live (Error interno).' });
-      } catch (e) {}
+      // Intento de rescate si falla
+      if (!interaction.replied) {
+        await interaction.editReply({ content: '❌ Error: No se pudo conectar al Live.' });
+      }
     }
   },
 };
