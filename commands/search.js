@@ -14,7 +14,7 @@ const supabase = createClient(
 
 // Emojis
 const strawberryEmoji = '<:strawberrity:1411384728119939182>';
-const nftEmoji = '<:nft:1441792691787792566>';
+const nftEmoji = '<:nft:1456378008826019973>';
 
 // Configuración de rareza
 const rarityConfig = {
