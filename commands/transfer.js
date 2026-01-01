@@ -248,7 +248,6 @@ module.exports = {
             
             confirmEmbed.addFields({
                 name: `${cleanName} ${rarityEmoji}`,
-                // CAMBIO: Eliminado el diamante 💎 de aquí
                 value: `${card.base_cards.group_name}\n\`${card.unique_card_id}\``,
                 inline: true 
             });
@@ -311,8 +310,7 @@ module.exports = {
              await supabase.from('user_cards').update({ user_id: receiver.id }).in('id', ids);
           }
 
-          // --- LOG HISTORIAL (AGREGADO) ---
-          // Preparamos un resumen para el log
+          // --- LOG HISTORIAL ---
           let details = `Envío a ${receiver.username}: `;
           if (moneyAmount) details += `${moneyAmount} coins. `;
           if (packCode) details += `1 pack (${packCode}). `;
@@ -320,13 +318,30 @@ module.exports = {
 
           await supabase.from('history_logs').insert({
               user_id: sender.id,
-              action_type: 'pack_trade', // Usamos 'pack_trade' para que tenga el icono de 🤝
+              action_type: 'pack_trade', 
               target_id: receiver.id,
               details: details.trim()
           });
-          // ---------------------------------
 
-          // --- MENSAJE FINAL ---
+          // --- CONSTRUCCIÓN DE LA LISTA DETALLADA PARA EL MENSAJE FINAL ---
+          let cardListText = '';
+          if (cardsToTransfer.length > 0) {
+              const lines = cardsToTransfer.map(c => {
+                  const emoji = getRarityEmoji(c.rarity || 1);
+                  const cleanName = c.base_cards.name.split(' — ')[0].trim();
+                  // Formato: 🍓 Idol - Grupo (Era)
+                  return `> ${emoji} **${cleanName}** - ${c.base_cards.group_name} *(${c.base_cards.era})*`;
+              });
+
+              // Si son muchas, cortamos para no romper el límite de Discord (2000-4000 caracteres)
+              if (lines.length > 20) {
+                  cardListText = `\n**🃏 Cartas Transferidas (${cardsToTransfer.length}):**\n` + lines.slice(0, 20).join('\n') + `\n...y ${lines.length - 20} más.`;
+              } else {
+                  cardListText = `\n**🃏 Cartas Transferidas (${cardsToTransfer.length}):**\n` + lines.join('\n');
+              }
+          }
+
+          // --- MENSAJE FINAL MODIFICADO ---
           const successEmbed = new EmbedBuilder()
             .setColor('#2ecc71')
             .setTitle('✅ Transferencia Completada')
@@ -334,7 +349,7 @@ module.exports = {
                 `**De:** ${sender}\n**Para:** ${receiver}\n\n` +
                 (moneyText ? moneyText : '') +
                 (packText ? packText : '') +
-                (cardsToTransfer.length > 0 ? `🃏 **${cardsToTransfer.length} Cartas transferidas**` : '')
+                cardListText // <--- AQUÍ VA LA LISTA DETALLADA
             )
             .addFields({ name: '📝 Mensaje', value: `*${reason}*` })
             .setTimestamp();
