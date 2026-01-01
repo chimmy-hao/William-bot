@@ -1,10 +1,10 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 // --- CONFIGURACIÓN ---
-const COOLDOWN_MINUTES = 3; 
+const COOLDOWN_MINUTES = 5; // <--- AHORA SON 5 MINUTOS
 const COOLDOWN_TIME = COOLDOWN_MINUTES * 60 * 1000; 
 
 // Emojis
@@ -12,9 +12,7 @@ const strawberryEmoji = '<:berrycoin:1411737957081288724>';
 const liveEmoji = '🔴';
 const eyeEmoji = '👁️';
 
-// GIFs de Live 
-// (Nota: Discord prefiere enlaces que terminen en .gif puros. Los de Tenor 'media1' suelen funcionar, 
-// pero si fallan, intenta buscar el enlace directo haciendo click derecho -> Copiar dirección de imagen)
+// GIFs
 const LIVE_GIFS = [
     'https://media1.tenor.com/m/-YVaVG9rilQAAAAd/william-william-jkp.gif',
     'https://media1.tenor.com/m/hT9oMGI60yQAAAAd/williamjkp-williamjkp-kiss.gif',
@@ -58,7 +56,7 @@ module.exports = {
           user = newUser;
       }
 
-      const lastUsed = user.last_golive_claim || 0; // Aseguramos que sea número
+      const lastUsed = user.last_golive_claim || 0; 
       const remaining = COOLDOWN_TIME - (now - lastUsed);
 
       if (remaining > 0) {
@@ -70,15 +68,17 @@ module.exports = {
         });
       }
 
+      // Iniciamos la espera
       await interaction.deferReply();
 
       // Variables de la simulación
       let viewers = 300 + Math.floor(Math.random() * 200); 
       let earnings = 0;
       
-      // Seleccionamos GIF y limpiamos espacios por si acaso
-      const rawGif = LIVE_GIFS[Math.floor(Math.random() * LIVE_GIFS.length)];
-      const gif = rawGif.trim(); 
+      // PREPARAMOS EL ARCHIVO (Esto soluciona que no se vea)
+      const gifUrl = LIVE_GIFS[Math.floor(Math.random() * LIVE_GIFS.length)];
+      // Creamos un attachment para asegurar que se vea
+      const gifFile = new AttachmentBuilder(gifUrl, { name: 'live.gif' });
 
       // --- FASE 1: INICIO (0s) ---
       const embed = new EmbedBuilder()
@@ -89,10 +89,11 @@ module.exports = {
             `👋 "¡Hola a todos! Tenía un rato libre antes del ensayo..."\n\n` +
             `💰 **Ganancia:** ${earnings} ${strawberryEmoji}`
         )
-        .setImage(gif) // <--- IMAGEN INICIAL
+        .setImage('attachment://live.gif') // Referencia al archivo adjunto
         .setFooter({ text: '🔴 Transmitiendo...' });
 
-      await interaction.editReply({ embeds: [embed] });
+      // Enviamos el embed CON el archivo
+      await interaction.editReply({ embeds: [embed], files: [gifFile] });
       await wait(4000); 
 
       // --- FASE 2: INTERACCIÓN (4s) ---
@@ -108,8 +109,8 @@ module.exports = {
         `💰 **Ganancia:** ${earnings} ${strawberryEmoji}`
       );
       embed.setTitle(`${liveEmoji} INSTAGRAM LIVE | ${eyeEmoji} ${viewers.toLocaleString()} viewers`);
-      embed.setImage(gif); // <--- REAFIRMAMOS LA IMAGEN AQUÍ
       
+      // Mantenemos el embed actualizado
       await interaction.editReply({ embeds: [embed] });
       await wait(4000); 
 
@@ -127,13 +128,13 @@ module.exports = {
         `💰 **Ganancia:** ${earnings} ${strawberryEmoji}`
       );
       embed.setTitle(`${liveEmoji} INSTAGRAM LIVE | ${eyeEmoji} ${viewers.toLocaleString()} viewers`);
-      embed.setImage(gif); // <--- REAFIRMAMOS LA IMAGEN OTRA VEZ
 
       await interaction.editReply({ embeds: [embed] });
       await wait(4000);
 
       // --- FASE FINAL: CIERRE Y GUARDADO (12s) ---
-      const totalBalance = (user.balance || 0) + earnings;
+      // Asegúrate que tu columna de dinero sea 'balance' (o cámbialo a 'currency' si usas eso)
+      const totalBalance = (user.balance || 0) + earnings; 
       
       await supabase.from('users').update({ 
           balance: totalBalance,
@@ -148,25 +149,26 @@ module.exports = {
           details: `Live Stream finalizado con ${viewers.toLocaleString()} viewers`
       });
 
-      embed.setColor('#2b2d31') // Gris apagado
+      embed.setColor('#2b2d31') 
       embed.setTitle(`⚫ LIVE FINALIZADO | Resumen`)
       embed.setDescription(
           `👋 "¡Me tengo que ir, el manager me llama! Bye bye~"\n\n` +
           `📊 **Estadísticas del Stream:**\n` +
           `👁️ **Pico de viewers:** ${viewers.toLocaleString()}\n` +
           `🍓 **Total recaudado:** **${earnings}** ${strawberryEmoji}\n\n` +
-          `⏰ *Podrás hacer otro live en 3 minutos.*`
+          `⏰ *Podrás hacer otro live en 5 minutos.*`
       );
-      embed.setImage(gif); // <--- MANTENEMOS EL GIF AL FINAL (Si quieres quitarlo pon null)
       embed.setFooter({ text: 'Live finalizado' });
 
       await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
       console.error('Error en golive:', error);
-      // Intento de rescate si falla
-      if (!interaction.replied) {
-        await interaction.editReply({ content: '❌ Error: No se pudo conectar al Live.' });
+      // Seguridad Anti-Crash: Si ya se respondió, editamos. Si no, respondemos.
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: '❌ Error: No se pudo conectar al Live.', ephemeral: true });
+      } else {
+        await interaction.editReply({ content: '❌ Error: Se cortó la conexión del Live.' });
       }
     }
   },
