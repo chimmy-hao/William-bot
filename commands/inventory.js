@@ -171,7 +171,7 @@ module.exports = {
 
       // --- MODO CARTAS ---
       
-      // 1. Cargar Cartas + HOLDERS (MODIFICADO)
+      // 1. Cargar Cartas + HOLDERS
       let query = supabase
         .from('user_cards')
         .select(`
@@ -208,37 +208,45 @@ module.exports = {
 
       // Paginación
       let page = 0;
-      const pageSize = 10;
+      const pageSize = 10; // 10 cartas por página (se verá bien en cuadrícula)
 
       const generateEmbed = (page) => {
         const start = page * pageSize;
         const end = start + pageSize;
         const shown = cards.slice(start, end);
 
-        return new EmbedBuilder()
+        const embed = new EmbedBuilder()
           .setColor('#2ecc71')
           .setTitle(`📚 Inventario de ${targetUser.username}`)
-          .setDescription(
-            shown.map(c => {
-                const rarity = rarityConfig[c.rarity] || rarityConfig[1];
-                const rawName = c.base_cards.name || 'Unknown';
-                const cleanName = rawName.split(' — ')[0].trim();
-                const group = c.base_cards.group_name || 'sin grupo';
-                const era = c.base_cards.era || 'desconocida';
-                const code = c.unique_card_id || c.base_cards.card_code;
-                
-                // VERIFICACIÓN NFT
-                const isNft = nftGroups.has(group.toLowerCase()) || nftIdols.has(cleanName.toLowerCase());
-                const nftStatus = isNft ? ` ${nftEmoji}` : '';
-
-                // (MODIFICADO) EMOJI DEL HOLDER
-                const holderEmoji = c.holders ? ` ${c.holders.emoji}` : '';
-
-                return `${rarity.stars} ${cleanName}${holderEmoji} — ${group} (${era})${nftStatus}\n\`${code}\``;
-              }).join('\n\n')
-          )
           .setFooter({ text: `Página ${page + 1}/${Math.ceil(cards.length / pageSize)} • Total: ${cards.length} cartas` })
           .setTimestamp();
+
+        // --- AQUÍ ESTÁ EL CAMBIO ESTÉTICO ---
+        shown.forEach(c => {
+            const rarity = rarityConfig[c.rarity] || rarityConfig[1];
+            const rawName = c.base_cards.name || 'Unknown';
+            const cleanName = rawName.split(' — ')[0].trim();
+            const group = c.base_cards.group_name || 'sin grupo';
+            const era = c.base_cards.era || 'desconocida';
+            const code = c.unique_card_id || c.base_cards.card_code;
+            
+            // VERIFICACIÓN NFT
+            const isNft = nftGroups.has(group.toLowerCase()) || nftIdols.has(cleanName.toLowerCase());
+            const nftStatus = isNft ? ` ${nftEmoji}` : '';
+
+            // EMOJI DEL HOLDER
+            const holderEmoji = c.holders ? ` ${c.holders.emoji}` : '';
+
+            // Agregamos como CAMPO (Field) en lugar de línea de texto
+            embed.addFields({
+                name: `**${cleanName}** ${group}`,
+                value: `${era}\n${rarity.stars}${holderEmoji}${nftStatus}\n**${code}**`,
+                inline: true // Esto crea la cuadrícula
+            });
+        });
+        // -------------------------------------
+
+        return embed;
       };
 
       const generateRow = (currPage) => {
@@ -318,4 +326,3 @@ module.exports = {
     }
   }
 };
-
