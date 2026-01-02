@@ -208,8 +208,7 @@ module.exports = {
 
       // Paginación
       let page = 0;
-      // CAMBIO 1: Bajamos a 9 cartas para que quede una cuadrícula perfecta de 3x3
-      const pageSize = 9; 
+      const pageSize = 9; // 9 cartas por página para cuadrícula 3x3
 
       const generateEmbed = (page) => {
         const start = page * pageSize;
@@ -222,7 +221,7 @@ module.exports = {
           .setFooter({ text: `Página ${page + 1}/${Math.ceil(cards.length / pageSize)} • Total: ${cards.length} cartas` })
           .setTimestamp();
 
-        // CAMBIO 2: Usamos forEach y addFields con inline: true
+        // --- GENERACIÓN ESTÉTICA EN CUADRÍCULA ---
         shown.forEach(c => {
             const rarity = rarityConfig[c.rarity] || rarityConfig[1];
             const rawName = c.base_cards.name || 'Unknown';
@@ -238,13 +237,16 @@ module.exports = {
             // EMOJI DEL HOLDER
             const holderEmoji = c.holders ? ` ${c.holders.emoji}` : '';
 
+            // FORMATO:
+            // Título: **Idol** — Grupo (NFT)
+            // Cuerpo: Era \n Estrellas+Holder \n `Código`
             embed.addFields({
-                name: `**${cleanName}** ${group}`,
-                value: `${era}\n${rarity.stars}${holderEmoji}${nftStatus}\n**${code}**`,
-                inline: true // <--- ESTO HACE LA MAGIA DE LA CUADRÍCULA
+                name: `**${cleanName}** — ${group}${nftStatus}`, 
+                value: `${era}\n${rarity.stars}${holderEmoji}\n\`${code}\``,
+                inline: true 
             });
         });
-
+        
         return embed;
       };
 
