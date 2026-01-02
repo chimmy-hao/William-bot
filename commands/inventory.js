@@ -208,7 +208,8 @@ module.exports = {
 
       // Paginación
       let page = 0;
-      const pageSize = 10; // 10 cartas por página (se verá bien en cuadrícula)
+      // CAMBIO 1: Bajamos a 9 cartas para que quede una cuadrícula perfecta de 3x3
+      const pageSize = 9; 
 
       const generateEmbed = (page) => {
         const start = page * pageSize;
@@ -221,7 +222,7 @@ module.exports = {
           .setFooter({ text: `Página ${page + 1}/${Math.ceil(cards.length / pageSize)} • Total: ${cards.length} cartas` })
           .setTimestamp();
 
-        // --- AQUÍ ESTÁ EL CAMBIO ESTÉTICO ---
+        // CAMBIO 2: Usamos forEach y addFields con inline: true
         shown.forEach(c => {
             const rarity = rarityConfig[c.rarity] || rarityConfig[1];
             const rawName = c.base_cards.name || 'Unknown';
@@ -237,14 +238,12 @@ module.exports = {
             // EMOJI DEL HOLDER
             const holderEmoji = c.holders ? ` ${c.holders.emoji}` : '';
 
-            // Agregamos como CAMPO (Field) en lugar de línea de texto
             embed.addFields({
                 name: `**${cleanName}** ${group}`,
                 value: `${era}\n${rarity.stars}${holderEmoji}${nftStatus}\n**${code}**`,
-                inline: true // Esto crea la cuadrícula
+                inline: true // <--- ESTO HACE LA MAGIA DE LA CUADRÍCULA
             });
         });
-        // -------------------------------------
 
         return embed;
       };
