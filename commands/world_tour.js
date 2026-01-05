@@ -86,11 +86,14 @@ module.exports = {
               user_id: userId, 
               current_city: 1, 
               last_checkin: now,
-              tour_notified: false 
+              tour_notified: false // Este es interno del tour
           });
-          
-          // Pagar
-          await supabase.from('users').update({ balance: (user.balance || 0) + pay }).eq('user_id', userId);
+
+          // 🔥 ACTIVAR NOTIFICACIÓN EN TABLA USERS (Para que index.js la vea)
+          await supabase.from('users').update({ 
+              balance: (user.balance || 0) + pay,
+              world_tour_notified: false 
+          }).eq('user_id', userId);
 
           // --- LOG HISTORIAL ---
           await supabase.from('history_logs').insert({
@@ -137,15 +140,18 @@ module.exports = {
           const pay = Math.floor(Math.random() * 201) + 100;
           const dest = getDest();
 
-          // Avanzar
+          // Avanzar en la tabla de tours
           await supabase.from('world_tours').update({ 
               current_city: nextStep, 
               last_checkin: now,
               tour_notified: false 
           }).eq('user_id', userId);
 
-          // Pagar
-          await supabase.from('users').update({ balance: (user.balance || 0) + pay }).eq('user_id', userId);
+          // 🔥 ACTIVAR NOTIFICACIÓN EN TABLA USERS Y PAGAR
+          await supabase.from('users').update({ 
+              balance: (user.balance || 0) + pay,
+              world_tour_notified: false 
+          }).eq('user_id', userId);
 
           // --- LOG HISTORIAL ---
           await supabase.from('history_logs').insert({
@@ -180,46 +186,38 @@ module.exports = {
           }
 
           const finalCoins = 3000;
-          
-          // Nombres de packs deben coincidir con tu tabla 'packs' si usas IDs numéricos
-          // Pero si usas IDs de texto como 'banana' o 'grape', asegúrate de que existen.
-          // Basado en tu sistema anterior, parece que usas pack_id numéricos.
-          // Si 'banana' es ID 1 y 'grape' es ID 2, cámbialo aquí.
-          // Asumiremos IDs de texto 'banana' y 'grape' según tu código original, 
-          // PERO apuntando a la tabla 'user_packs' y columna 'pack_id'.
-          
           const packs = [
               { id: 'banana', name: 'Banana Pack', emoji: bananaEmoji },
               { id: 'grape', name: 'Grape Pack', emoji: grapeEmoji }
           ];
 
-          // 1. Dar Dinero
-          await supabase.from('users').update({ balance: (user.balance || 0) + finalCoins }).eq('user_id', userId);
+          // 1. Dar Dinero y DETENER NOTIFICACIONES
+          await supabase.from('users').update({ 
+              balance: (user.balance || 0) + finalCoins,
+              world_tour_notified: true // Lo ponemos en true para que el bot deje de avisar
+          }).eq('user_id', userId);
 
-          // 2. Dar Packs (CORREGIDO: Tabla user_packs)
+          // 2. Dar Packs (A tabla user_packs)
           for (const p of packs) {
-              // Verificamos si ya tiene packs de ese tipo
               const { data: currentPack } = await supabase
-                .from('user_packs') // <--- CAMBIO IMPORTANTE: user_packs en vez de user_inventory
+                .from('user_packs')
                 .select('quantity')
                 .eq('user_id', userId)
-                .eq('pack_id', p.id) // <--- CAMBIO: pack_id en vez de item_id
+                .eq('pack_id', p.id)
                 .single();
               
               const newQty = (currentPack?.quantity || 0) + 1;
               
-              const { error: packError } = await supabase.from('user_packs').upsert(
+              await supabase.from('user_packs').upsert(
                 { user_id: userId, pack_id: p.id, quantity: newQty }, 
                 { onConflict: 'user_id, pack_id' }
               );
-              
-              if (packError) console.error(`Error dando pack ${p.id}:`, packError);
           }
 
           // --- LOG HISTORIAL ---
           await supabase.from('history_logs').insert({
               user_id: userId,
-              action_type: 'pack_win', // Cambiado a pack_win para que salga en el historial de packs
+              action_type: 'pack_win', 
               amount: finalCoins,
               details: `World Tour Finalizado (Bonus + Banana/Grape Packs)`
           });
