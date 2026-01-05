@@ -13,20 +13,22 @@ const COOLDOWN_TIME = 12 * 60 * 60 * 1000; // 12 Horas
 const REWARD_AMOUNT = 2000;
 const REWARD_RARITY = 2; 
 
-// --- LISTA DE GIFS ---
+// --- LISTA DE GIFS (ENLACES CORREGIDOS) ---
+// Usamos enlaces directos .gif para evitar que se congelen
 const williamDailyGifs = [
-    'https://media.tenor.com/ggNFlSnG8vwAAAA1/williamest-yeolykn-williamest-tiktok.webp',
-    'https://media.tenor.com/PM1ITcPfrbsAAAAM/lyknzip-williamest.gif',
-    'https://media.tenor.com/FEFJhjlqVmgAAAAM/william-jkp-est-supha.gif',
-    'https://media.tenor.com/QZLaSri-3vEAAAAM/williamest.gif',
-    'https://media.tenor.com/v1Hx0S5x0E0AAAAM/lyknzip-williamest.gif',
-    'https://media.tenor.com/QTdaowTO83YAAAAM/lyknzip-williamest.gif',
-    'https://media.tenor.com/A47HPlAobh4AAAA1/williamest-willest.gif',
-    'https://media.tenor.com/1d5MfbVU6GwAAAA1/williamest-william.gif',
-    'https://media.tenor.com/y8_CKT4lbyIAAAAM/you-maniac-williamest.gif',
-    'https://media.tenor.com/jKjMaqzJJ-UAAAAM/thamepo-thamepo-kiss.gif',
-    'https://media.tenor.com/9801rZ2P1YYAAAAM/thamepo-thamepo-forehead-kiss.gif',
-    'https://media.tenor.com/aOYEYRzEXdAAAAAM/thamepo-thamepo-heart-that-skips-a-beat.gif'
+    'https://media.tenor.com/ggNFlSnG8vwAAAAC/williamest-yeolykn.gif',
+    'https://media.tenor.com/PM1ITcPfrbsAAAAC/lyknzip-williamest.gif',
+    'https://media.tenor.com/FEFJhjlqVmgAAAAC/william-jkp-est-supha.gif',
+    'https://media.tenor.com/QZLaSri-3vEAAAAC/williamest.gif',
+    'https://media.tenor.com/v1Hx0S5x0E0AAAAC/lyknzip-williamest.gif',
+    'https://media.tenor.com/QTdaowTO83YAAAAC/lyknzip-williamest.gif',
+    'https://media.tenor.com/A47HPlAobh4AAAAC/williamest-willest.gif',
+    'https://media.tenor.com/1d5MfbVU6GwAAAAC/williamest-william.gif',
+    'https://media.tenor.com/y8_CKT4lbyIAAAAC/you-maniac-williamest.gif',
+    'https://media.tenor.com/jKjMaqzJJ-UAAAAC/thamepo-thamepo-kiss.gif',
+    'https://media.tenor.com/9801rZ2P1YYAAAAC/thamepo-thamepo-forehead-kiss.gif',
+    'https://media.tenor.com/aOYEYRzEXdAAAAAC/thamepo-thamepo-heart-that-skips-a-beat.gif',
+    'https://media.tenor.com/pOaLExWXPbQAAAAC/thamepo-thamepo-gmmtv.gif'
 ];
 
 const generateUniqueCardCode = (baseCode) => {
@@ -70,7 +72,7 @@ module.exports = {
         .from('base_cards')
         .select('*')
         .eq('rarity_level', REWARD_RARITY)
-        .eq('is_active', true); // <--- ÚNICO CAMBIO: Filtro para ignorar cartas del pool
+        .eq('is_active', true); 
 
       if (cardError || !rareCards || rareCards.length === 0) {
         return interaction.editReply('❌ Error: No hay cartas de rareza 2 disponibles o activas.');
@@ -131,24 +133,14 @@ module.exports = {
           )
           .setTimestamp();
 
-      const filesToSend = [];
-
+      // Ya no necesitamos el "parche" de webp porque actualizamos la lista arriba
+      // Pero dejamos una lógica simple por seguridad
       if (williamDailyGifs && williamDailyGifs.length > 0) {
-          let randomGif = williamDailyGifs[Math.floor(Math.random() * williamDailyGifs.length)];
-          
-          // 🔧 PARCHE: Webp a Gif
-          if (randomGif.includes('.webp')) {
-              randomGif = randomGif.replace('.webp', '.gif');
-          }
-          
+          const randomGif = williamDailyGifs[Math.floor(Math.random() * williamDailyGifs.length)];
           embed.setImage(randomGif);
-      } else {
-          const file = new AttachmentBuilder('./daily.gif');
-          embed.setImage('attachment://daily.gif');
-          filesToSend.push(file);
-      }
+      } 
 
-      await interaction.editReply({ embeds: [embed], files: filesToSend });
+      await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
       console.error('Error en daily:', error);
