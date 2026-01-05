@@ -1,11 +1,11 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+// 1. Importamos AttachmentBuilder
+const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 
 // --- CONFIGURACIÓN DE RECETAS ---
-// Esto es solo visual, asegúrate de que coincida con la lógica de licuadora.js
 const RECIPES = [
   {
     name: 'Banana Pack',
-    emoji: '<:pack_banana:1413292531134759053>', // Asegúrate de que este ID sea correcto
+    emoji: '<:pack_banana:1413292531134759053>',
     desc: '• **8x** Cartas Rareza 1\n• **2x** Cartas Rareza 2',
     color: '#F1C40F' // Amarillo Banana
   },
@@ -29,21 +29,27 @@ module.exports = {
     .setDescription('📜 Muestra las combinaciones para la Licuadora'),
 
   async execute(interaction) {
+    // 2. Preparamos la imagen como archivo adjunto
+    // Asegúrate de que el archivo 'licuadora.png' esté en la carpeta principal del bot
+    const blenderImage = new AttachmentBuilder('./licuadora.png');
+
     const embed = new EmbedBuilder()
       .setTitle('🌪️ Recetario de la Licuadora')
       .setDescription('Combina tus cartas repetidas para crear nuevos Packs.\nUsa el comando `/licuadora` seguido de los códigos.')
       .setColor('#FFA500') // Naranja
-      .setThumbnail('https://cdn-icons-png.flaticon.com/512/763/763812.png') // Icono aesthetic de cocina/receta
+      // 3. Usamos la imagen adjunta como miniatura
+      .setThumbnail('attachment://licuadora.png') 
       .setTimestamp();
 
     RECIPES.forEach(recipe => {
       embed.addFields({
         name: `${recipe.emoji} __${recipe.name}__`,
         value: recipe.desc,
-        inline: true // Se verán en cuadrícula si hay espacio
+        inline: true 
       });
     });
 
-    await interaction.reply({ embeds: [embed] });
+    // 4. Enviamos el embed JUNTO con el archivo
+    await interaction.reply({ embeds: [embed], files: [blenderImage] });
   }
 };
