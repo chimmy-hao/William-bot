@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
@@ -14,7 +14,7 @@ module.exports = {
     // SUBCOMANDO: ADD
     .addSubcommand(sub => 
       sub.setName('add')
-        .setDescription('Agrega un Grupo o Idol a tu lista NFT')
+        .setDescription('Agrega un Grupo o Idols a tu lista NFT')
         .addStringOption(opt => opt.setName('group').setDescription('Selecciona un grupo').setAutocomplete(true))
         .addStringOption(opt => 
             opt.setName('members')
@@ -24,7 +24,8 @@ module.exports = {
                    { name: 'No, solo especificaré idols individuales', value: 'no' }
                )
         )
-        .addStringOption(opt => opt.setName('idol').setDescription('Selecciona un idol específico').setAutocomplete(true))
+        // Aclaramos en la descripción que acepta comas
+        .addStringOption(opt => opt.setName('idol').setDescription('Idol(s) específico(s) separados por coma').setAutocomplete(true))
     )
     
     // SUBCOMANDO: REMOVE
@@ -69,27 +70,32 @@ module.exports = {
       // === ADD ===
       if (subcommand === 'add') {
         const group = interaction.options.getString('group');
-        const idol = interaction.options.getString('idol');
+        const idolInput = interaction.options.getString('idol'); // Puede contener comas
         const membersOption = interaction.options.getString('members');
 
-        if (!group && !idol) return interaction.editReply('⚠️ Selecciona un **Grupo** o un **Idol**.');
+        if (!group && !idolInput) return interaction.editReply('⚠️ Selecciona un **Grupo** o escribe **Idols**.');
 
         const inserts = [];
 
-        // Lógica para Grupo
+        // 1. Lógica para Grupo
         if (group) {
             if (membersOption === 'no') {
-                // Si elige grupo pero dice "No, solo idols", le avisamos (salvo que haya puesto tambien un idol)
-                if (!idol) return interaction.editReply('⚠️ Elegiste "No agregar todo el grupo", por favor selecciona un **Idol** específico en el campo correspondiente.');
+                if (!idolInput) return interaction.editReply('⚠️ Elegiste "No agregar todo el grupo", por favor especifica los idols.');
             } else {
-                // Si es 'yes' o no puso nada, agregamos el GRUPO
+                // Agregamos el GRUPO COMPLETO
                 inserts.push({ user_id: userId, target_type: 'group', target_name: group });
             }
         }
 
-        // Lógica para Idol
-        if (idol) {
-            inserts.push({ user_id: userId, target_type: 'idol', target_name: idol });
+        // 2. Lógica para Idols (Múltiples separados por coma)
+        if (idolInput) {
+            // Separamos por coma, limpiamos espacios y filtramos vacíos
+            const idolsArray = idolInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            
+            for (const idolName of idolsArray) {
+                // Opcional: Podríamos validar si el idol existe en DB, pero asumimos que el usuario sabe escribirlo o usó el autocomplete para el primero
+                inserts.push({ user_id: userId, target_type: 'idol', target_name: idolName });
+            }
         }
 
         if (inserts.length === 0) return interaction.editReply('⚠️ No se realizó ninguna acción.');
@@ -97,7 +103,10 @@ module.exports = {
         const { error } = await supabase.from('user_nfts').upsert(inserts, { onConflict: 'user_id, target_type, target_name' });
         
         if (error) throw error;
-        return interaction.editReply(`✅ Lista actualizada. Ahora tus cartas de **${inserts.map(i => i.target_name).join(' y ')}** aparecerán con ${nftEmoji}.`);
+
+        // Mensaje de éxito formateado
+        const namesAdded = inserts.map(i => i.target_name).join(', ');
+        return interaction.editReply(`✅ Lista actualizada. Agregado: **${namesAdded}** ${nftEmoji}.`);
       }
 
       // === REMOVE ===
@@ -109,7 +118,6 @@ module.exports = {
 
         let query = supabase.from('user_nfts').delete().eq('user_id', userId);
         
-        // Construir filtro OR (borrar grupo O borrar idol)
         const conditions = [];
         if (group) conditions.push(`target_name.eq.${group}`);
         if (idol) conditions.push(`target_name.eq.${idol}`);
@@ -122,22 +130,78 @@ module.exports = {
         return interaction.editReply(`✅ Se han eliminado de tu lista NFT.`);
       }
 
-      // === VIEW ===
+      // === VIEW (LOGICA DE AGRUPACIÓN) ===
       if (subcommand === 'view') {
         const { data: nfts } = await supabase.from('user_nfts').select('*').eq('user_id', userId);
 
         if (!nfts || nfts.length === 0) return interaction.editReply('📭 Tu lista NFT está vacía.');
 
-        const groups = nfts.filter(n => n.target_type === 'group').map(n => n.target_name);
-        const idols = nfts.filter(n => n.target_type === 'idol').map(n => n.target_name);
+        // Separar grupos e idols
+        const fullGroups = nfts.filter(n => n.target_type === 'group').map(n => n.target_name);
+        const individualIdols = nfts.filter(n => n.target_type === 'idol').map(n => n.target_name);
+
+        let idolDisplay = "Ninguno";
+
+        // Si hay idols individuales, buscamos sus grupos para mostrarlos bonitos
+        if (individualIdols.length > 0) {
+            // Consultamos la tabla base_cards para saber el grupo de cada idol
+            // Buscamos cualquier carta que coincida con el nombre del idol
+            const { data: cardsInfo } = await supabase
+                .from('base_cards')
+                .select('name, group_name')
+                .in('name', individualIdols.map(name => {
+                    // El truco es que en base_cards el nombre es "Idol — Group", necesitamos buscar coincidencia parcial o ajustar la búsqueda.
+                    // Para simplificar y ser eficientes, asumimos que el nombre guardado en NFT es el nombre limpio.
+                    // Haremos una búsqueda aproximada o traeremos todo y filtraremos en JS.
+                    return name; 
+                }));
+            
+            // Nota: Como 'name' en base_cards suele ser "Idol — Group", la búsqueda exacta .in() podría fallar si guardaste solo "Idol".
+            // Vamos a intentar obtener los grupos haciendo una búsqueda más amplia o usando lo que ya tenemos.
+            // MEJOR ESTRATEGIA: Traemos todos los grupos posibles para esos idols.
+            
+            const { data: allIds } = await supabase
+                .from('base_cards')
+                .select('name, group_name');
+            
+            // Mapeamos: { "Felix": "Stray Kids", "Momo": "TWICE" }
+            const idolGroupMap = {};
+            if (allIds) {
+                allIds.forEach(c => {
+                    const cleanName = c.name.split(' — ')[0].trim();
+                    if (individualIdols.includes(cleanName)) {
+                        idolGroupMap[cleanName] = c.group_name || "Sin Grupo";
+                    }
+                });
+            }
+
+            // Agrupamos visualmente: { "Stray Kids": ["Felix", "Hyunjin"], "TWICE": ["Momo"] }
+            const groupedDisplay = {};
+            individualIdols.forEach(idol => {
+                const grp = idolGroupMap[idol] || "Otros";
+                if (!groupedDisplay[grp]) groupedDisplay[grp] = [];
+                groupedDisplay[grp].push(idol);
+            });
+
+            // Construimos el texto
+            const lines = [];
+            for (const [grp, ids] of Object.entries(groupedDisplay)) {
+                if (grp === "Otros") {
+                    lines.push(`**Varios:** ${ids.join(', ')}`);
+                } else {
+                    lines.push(`**${grp}:** ${ids.join(', ')}`);
+                }
+            }
+            idolDisplay = lines.join('\n');
+        }
 
         const embed = new EmbedBuilder()
             .setColor('#2b2d31')
             .setTitle(`🔒 Lista NFT de ${interaction.user.username}`)
-            .setDescription('Cualquier carta futura de estos artistas tendrá el ícono NFT automáticamente.')
+            .setDescription(`Tus cartas protegidas con ${nftEmoji}.`)
             .addFields(
-                { name: 'Grupos Completos', value: groups.length ? groups.join('\n') : 'Ninguno', inline: true },
-                { name: 'Idols Individuales', value: idols.length ? idols.join('\n') : 'Ninguno', inline: true }
+                { name: '🏢 Grupos Completos', value: fullGroups.length ? fullGroups.join('\n') : 'Ninguno', inline: false },
+                { name: '👤 Idols Individuales', value: idolDisplay, inline: false }
             );
 
         return interaction.editReply({ embeds: [embed] });
