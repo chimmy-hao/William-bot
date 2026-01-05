@@ -108,7 +108,6 @@ module.exports = {
     const eraFilter = interaction.options.getString('eras');
     const sortFilter = interaction.options.getString('sort') || 'new'; 
 
-    // Validación: Evitar búsquedas masivas sin filtro (ej: listar 10000 cartas)
     if (!idolFilter && !groupFilter && !rarityFilter && !eraFilter) {
         return interaction.reply({ content: '⚠️ Por favor, usa al menos un filtro (Grupo, Idol, Rareza o Era) para buscar.', ephemeral: true });
     }
@@ -116,7 +115,7 @@ module.exports = {
     try {
       await interaction.deferReply();
 
-      // 1. CONSULTA GLOBAL (Sin filtrar por user_id)
+      // 1. CONSULTA DE CARTAS
       let query = supabase
         .from('user_cards')
         .select(`
@@ -124,7 +123,6 @@ module.exports = {
           user_id, 
           rarity,
           unique_card_id,
-          is_nft, 
           base_cards!inner (
             name,
             group_name,
@@ -135,21 +133,18 @@ module.exports = {
           )
         `);
 
-      // Filtros
       if (idolFilter) query = query.ilike('base_cards.name', `%${idolFilter}%`);
       if (groupFilter) query = query.ilike('base_cards.group_name', `%${groupFilter}%`);
       if (eraFilter) query = query.ilike('base_cards.era', `%${eraFilter}%`);
       if (rarityFilter) query = query.eq('rarity', rarityFilter);
 
-      // Sort
       switch (sortFilter) {
         case 'old': query = query.order('id', { ascending: true }); break;
         case 'number': query = query.order('unique_card_id', { ascending: true }); break;
         case 'idol': query = query.order('name', { foreignTable: 'base_cards', ascending: true }); break;
-        default: query = query.order('id', { ascending: false }); break; // new
+        default: query = query.order('id', { ascending: false }); break;
       }
 
-      // Límite de seguridad (ej. 500 resultados máx para no saturar memoria)
       query = query.limit(500);
 
       const { data: cards, error } = await query;
@@ -160,36 +155,62 @@ module.exports = {
       }
 
       if (!cards || cards.length === 0) {
-        return interaction.editReply(`😢 No se encontraron cartas con esos filtros en ningún inventario.`);
+        return interaction.editReply(`😢 No se encontraron cartas con esos filtros.`);
+      }
+
+      // 2. LÓGICA DE NFT (FIX)
+      // Obtenemos los IDs de los usuarios encontrados en la búsqueda
+      const userIds = [...new Set(cards.map(c => c.user_id))];
+
+      // Consultamos las preferencias NFT de ESOS usuarios
+      const { data: nfts } = await supabase
+        .from('user_nfts')
+        .select('user_id, target_type, target_name')
+        .in('user_id', userIds);
+
+      // Creamos un mapa rápido para verificar NFT:  nftMap[userId] = { groups: Set, idols: Set }
+      const nftMap = {};
+      if (nfts) {
+        nfts.forEach(n => {
+            if (!nftMap[n.user_id]) nftMap[n.user_id] = { groups: new Set(), idols: new Set() };
+            if (n.target_type === 'group') nftMap[n.user_id].groups.add(n.target_name.toLowerCase());
+            if (n.target_type === 'idol') nftMap[n.user_id].idols.add(n.target_name.toLowerCase());
+        });
       }
 
       // Paginación
       let page = 0;
-      const pageSize = 9; // 9 para que se vea bien en grid de 3x3 visualmente (aunque es texto)
+      const pageSize = 9;
 
       const generateEmbed = (page) => {
         const start = page * pageSize;
         const end = start + pageSize;
         const shown = cards.slice(start, end);
 
-        // Agrupamos la visualización en columnas
         const embed = new EmbedBuilder()
-          .setColor('#e91e63') // Un color diferente para diferenciar del inventario personal
+          .setColor('#e91e63')
           .setTitle(`🔍 Búsqueda Global (${cards.length} resultados)`)
           .setFooter({ text: `Página ${page + 1}/${Math.ceil(cards.length / pageSize)}` })
           .setTimestamp();
 
-        // Usamos Fields para que se vea como una grilla (3 columnas)
         shown.forEach(c => {
             const rarity = rarityConfig[c.rarity] || rarityConfig[1];
             const cleanName = c.base_cards.name.split(' — ')[0].trim();
             const group = c.base_cards.group_name || 'sin grupo';
             const era = c.base_cards.era || '??';
-            const nftStatus = c.is_nft ? ` ${nftEmoji}` : '';
+            
+            // VERIFICACIÓN NFT (ESPECÍFICA PARA EL DUEÑO DE LA CARTA)
+            let isNft = false;
+            if (nftMap[c.user_id]) {
+                const userPrefs = nftMap[c.user_id];
+                if (userPrefs.groups.has(group.toLowerCase())) isNft = true;
+                if (userPrefs.idols.has(cleanName.toLowerCase())) isNft = true;
+            }
+            const nftStatus = isNft ? ` ${nftEmoji}` : '';
             
             embed.addFields({
                 name: `${rarity.stars} ${cleanName}`,
-                value: `${group} (${era})${nftStatus}\n\`${c.unique_card_id}\`\n👤 <@${c.user_id}>`, // Muestra el dueño
+                value: `${group} (${era})${nftStatus}\n\`${c.unique_card_id}\`\n👤 <@${c.user_id}>`,
                 inline: true 
             });
         });
