@@ -18,7 +18,6 @@ const williamDailyGifs = [
     'https://media.tenor.com/ggNFlSnG8vwAAAA1/williamest-yeolykn-williamest-tiktok.webp',
     'https://media.tenor.com/PM1ITcPfrbsAAAAM/lyknzip-williamest.gif',
     'https://media.tenor.com/FEFJhjlqVmgAAAAM/william-jkp-est-supha.gif',
-    'https://media.tenor.com/pOaLExWXPbQAAAA1/thamepo-thamepo-gmmtv.gif',
     'https://media.tenor.com/QZLaSri-3vEAAAAM/williamest.gif',
     'https://media.tenor.com/v1Hx0S5x0E0AAAAM/lyknzip-williamest.gif',
     'https://media.tenor.com/QTdaowTO83YAAAAM/lyknzip-williamest.gif',
