@@ -8,6 +8,7 @@ const supabase = createClient(
 );
 
 // --- CONFIGURACIÓN DE RECETAS ---
+// NOTA: Si cambias algo aquí, recuerda cambiarlo también en recetas.js visualmente
 const RECIPES = {
   banana: {
     name: 'Banana Pack',
@@ -32,7 +33,7 @@ const COOLDOWN_TIME = 12 * 60 * 60 * 1000; // 12 Horas
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('licuadora')
-    .setDescription('🌪️ Recicla tus cartas para obtener un pack.')
+    .setDescription('🌪️ Recicla tus cartas para obtener un pack. (Ver recetas: /recetas)') // <--- Mención aquí
     .addStringOption(option =>
       option.setName('codes')
         .setDescription('Los códigos de las cartas (separados por espacio)')
@@ -45,11 +46,7 @@ module.exports = {
     const codesInput = interaction.options.getString('codes');
     const now = Date.now();
 
-    // ---------------------------------------------------------
-    // 1. GESTIÓN DE COOLDOWN (BASE DE DATOS)
-    // ---------------------------------------------------------
-
-    // Obtener estado actual
+    // 1. GESTIÓN DE COOLDOWN
     let { data: user } = await supabase
         .from('users')
         .select('licuadora_uses, licuadora_reset_time')
@@ -59,13 +56,11 @@ module.exports = {
     let uses = user?.licuadora_uses || 0;
     let expiresAt = user?.licuadora_reset_time || 0;
 
-    // Verificar reset de tiempo
     if (now > expiresAt) {
         uses = 0;
         expiresAt = 0; 
     }
 
-    // Verificar límite de usos
     if (uses >= MAX_USES) {
         const remaining = expiresAt - now;
         const hours = Math.floor(remaining / (1000 * 60 * 60));
@@ -79,10 +74,7 @@ module.exports = {
     await interaction.deferReply();
 
     try {
-      // ---------------------------------------------------------
       // 2. LÓGICA DEL COMANDO
-      // ---------------------------------------------------------
-      
       const codeList = codesInput.split(/[\s,]+/).filter(c => c.length > 0);
       const uniqueCodes = [...new Set(codeList)];
 
@@ -110,12 +102,13 @@ module.exports = {
 
       // 5. VERIFICAR RECETA
       let matchedPack = null;
+      let matchedPackKey = null;
 
       for (const [key, recipe] of Object.entries(RECIPES)) {
         const r = recipe.required;
         if (counts[1] === r[1] && counts[2] === r[2] && counts[3] === r[3]) {
-          matchedPack = key;
-          matchedPackKey = key; // Guardamos la key para usarla luego
+          matchedPack = recipe;
+          matchedPackKey = key;
           break; 
         }
       }
@@ -123,19 +116,14 @@ module.exports = {
       if (!matchedPack) {
         return interaction.editReply({
           content: `❌ **Mezcla Incorrecta.**\n\n` +
-                   `**Ingresaste:** ${counts[1]}x 1s | ${counts[2]}x 2s | ${counts[3]}x 3s\n\n` +
-                   `📜 **Recetas:**\n` +
-                   `🍌 **Banana:** 8x 1s + 2x 2s\n` +
-                   `🍇 **Grape:** 4x 1s + 6x 2s\n` +
-                   `🥝 **Kiwi:** 4x 1s + 4x 2s + 2x 3s`
+                   `**Ingresaste:** ${counts[1]}x R1 | ${counts[2]}x R2 | ${counts[3]}x R3\n` +
+                   `💡 _Usa \`/recetas\` para ver las combinaciones exactas._` // <--- Mención aquí
         });
       }
 
-      const recipe = RECIPES[matchedPack];
+      const recipe = matchedPack;
 
       // 6. EJECUTAR EL INTERCAMBIO
-      
-      // A) Mover cartas al Bot
       const cardIds = cards.map(c => c.id);
       const { error: moveError } = await supabase
         .from('user_cards')
@@ -144,12 +132,11 @@ module.exports = {
       
       if (moveError) throw moveError;
 
-      // B) Dar el Pack
       const { data: currentPack } = await supabase
         .from('user_packs')
         .select('quantity')
         .eq('user_id', userId)
-        .eq('pack_code', matchedPack)
+        .eq('pack_id', matchedPackKey)
         .single();
 
       const newAmount = (currentPack?.quantity || 0) + 1;
@@ -159,17 +146,15 @@ module.exports = {
         .upsert(
             { 
               user_id: userId, 
-              pack_code: matchedPack, 
+              pack_id: matchedPackKey, 
               quantity: newAmount 
             },
-            { onConflict: 'user_id, pack_code' }
+            { onConflict: 'user_id, pack_id' }
         );
 
       if (packError) throw packError;
 
-      // ---------------------------------------------------------
-      // 7. ACTUALIZAR COOLDOWN + NOTIFICACIÓN + HISTORIAL
-      // ---------------------------------------------------------
+      // 7. ACTUALIZAR COOLDOWN
       uses += 1;
       let newExpiresAt = expiresAt;
 
@@ -177,26 +162,24 @@ module.exports = {
         newExpiresAt = now + COOLDOWN_TIME;
       }
 
-      // Preparar updates usuario
       let userUpdates = {
         user_id: userId,
         licuadora_uses: uses,
         licuadora_reset_time: newExpiresAt
       };
 
-      // 🔔 AVISO SOLO SI GASTA EL ÚLTIMO USO
       if (uses >= MAX_USES) {
           userUpdates.licuadora_notified = false;
       }
 
       await supabase.from('users').upsert(userUpdates, { onConflict: 'user_id' });
 
-      // 📜 HISTORIAL
+      // HISTORIAL
       await supabase.from('history_logs').insert({
           user_id: userId,
           action_type: 'licuadora',
           amount: 1,
-          details: `Crafting: Creó 1x ${recipe.name} usando ${cards.length} cartas`
+          details: `Crafting: Creó 1x ${recipe.name}`
       });
 
       // Embed final
@@ -208,14 +191,15 @@ module.exports = {
           { name: 'Resultado', value: `Obtuviste 1x ${recipe.emoji} **${recipe.name}**` },
           { name: 'Inventario', value: 'El pack se ha guardado en tu inventario.' }
         )
-        .setFooter({ text: `Usos restantes hoy: ${MAX_USES - uses}` });
+        // Mención aquí también
+        .setFooter({ text: `Usos restantes hoy: ${MAX_USES - uses} • ¿Dudas? Usa /recetas` });
 
       await interaction.editReply({ embeds: [embed] });
 
     } catch (err) {
       console.error("Error licuadora:", err);
       const msg = err.message || "Error desconocido";
-      await interaction.editReply(`❌ Ocurrió un error en la base de datos: \`${msg}\``).catch(() => {});
+      await interaction.editReply(`❌ Ocurrió un error: \`${msg}\``).catch(() => {});
     }
   }
 };
