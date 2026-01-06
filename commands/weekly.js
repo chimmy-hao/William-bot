@@ -16,7 +16,7 @@ const weeklyGifs = [
     'https://media.tenor.com/sEWvs4aajowAAAAM/lykn-williamjkp.gif',
     'https://media.tenor.com/SkKGg1qaV7MAAAAM/lykn-williamjkp.gif',
     'https://media.tenor.com/_dCnuDEYc7MAAAAM/lykn-william-lykn.gif',
-    'https://media.tenor.com/fbX5_SKWKO4AAAAM/lyknzip-lykn.gif', // <--- FALTABA ESTA COMA AQUÍ
+    'https://media.tenor.com/fbX5_SKWKO4AAAAM/lyknzip-lykn.gif',
     'https://media.tenor.com/Nx318i7PY0QAAAAM/lykn-william-lykn.gif'
 ];
 
@@ -27,7 +27,6 @@ module.exports = {
 
   async execute(interaction) {
     const userId = interaction.user.id;
-    // Usamos new Date() para manejar mejor timestamps en DB
     const now = Date.now(); 
 
     try {
@@ -36,8 +35,8 @@ module.exports = {
       // 1. VERIFICAR COOLDOWN
       let { data: user } = await supabase.from('users').select('last_weekly_claim').eq('user_id', userId).single();
       
-      // Convertimos a número por seguridad si viene de DB como string ISO
-      const lastUsed = user?.last_weekly_claim ? new Date(user.last_weekly_claim).getTime() : 0;
+      // Convertimos a número (aunque venga null o 0)
+      const lastUsed = user?.last_weekly_claim || 0;
       const remaining = COOLDOWN_TIME - (now - lastUsed);
 
       if (remaining > 0) {
@@ -48,32 +47,34 @@ module.exports = {
       }
 
       // 2. ENTREGA DE PREMIOS (PACKS)
+      // CORRECCIÓN: Usamos 'pack_code' porque así se llama en tu tabla
       const rewardCodes = REWARDS.map(r => r.code);
       const { data: currentPacks } = await supabase
         .from('user_packs')
         .select('*')
         .eq('user_id', userId)
-        .in('pack_code', rewardCodes);
+        .in('pack_code', rewardCodes); // <--- AQUI: pack_code
 
       const updates = REWARDS.map(reward => {
-        const existingPack = currentPacks?.find(p => p.pack_code === reward.code);
+        const existingPack = currentPacks?.find(p => p.pack_code === reward.code); // <--- AQUI: pack_code
         return {
             user_id: userId,
-            pack_code: reward.code,
+            pack_code: reward.code, // <--- AQUI: pack_code
             quantity: (existingPack ? existingPack.quantity : 0) + reward.count
         };
       });
 
       // Upsert Packs
+      // CORRECCIÓN: El conflicto es (user_id, pack_code)
       const { error: packError } = await supabase.from('user_packs').upsert(updates, { onConflict: 'user_id, pack_code' });
       if (packError) throw new Error(`Error guardando packs: ${packError.message}`);
 
       // 3. ACTUALIZAR TIEMPO + NOTIFICACIÓN
-      // Guardamos la fecha en formato ISO para compatibilidad con Supabase
+      // IMPORTANTE: Guardamos 'now' (número) NO .toISOString(), porque la columna es bigint
       await supabase.from('users').upsert({
         user_id: userId,
         username: interaction.user.username,
-        last_weekly_claim: new Date().toISOString(), // Formato seguro
+        last_weekly_claim: now, 
         weekly_notified: false 
       }, { onConflict: 'user_id' });
 
@@ -96,37 +97,27 @@ module.exports = {
             `**William** te otorga estos packs por ayudarlo a organizar el ensayo para el *comeback* de **LYKN**. ¡Gracias por tu esfuerzo!\n\n` +
             `🎁 **Obtuviste:**\n${packsList}`
         )
-        .setFooter({ text: '¡Vuelve en 7 días para más suministros!' })
+        .setFooter({ text: '¡Vuelve en 7 días para más items!' })
         .setTimestamp();
 
-      // --- LÓGICA DE IMAGEN (MAIN vs VARIACIÓN) ---
+      // --- LÓGICA DE IMAGEN ---
       const filesToSend = [];
-      
-      // Tiramos una moneda: 50% probabilidad de usar el GIF LOCAL (Main)
-      // Si la lista de gifs está vacía, usamos el local obligatoriamente
       const useMainGif = Math.random() < 0.5 || weeklyGifs.length === 0;
-
-      // Variable para guardar la URL final si es remota
       let finalImageUrl = null;
 
       if (useMainGif) {
           try {
-             // CASO MAIN: Intentamos usar el archivo local
              const file = new AttachmentBuilder('./weekly.gif');
              embed.setImage('attachment://weekly.gif');
              filesToSend.push(file);
           } catch (e) {
              console.error("No se encontró weekly.gif local, usando remoto.");
-             // Fallback si no existe el archivo local
              finalImageUrl = weeklyGifs[0];
           }
       } 
       
       if (!useMainGif || finalImageUrl) {
-          // CASO VARIACIÓN (o fallback): Usamos uno de la lista
           let randomGif = finalImageUrl || weeklyGifs[Math.floor(Math.random() * weeklyGifs.length)];
-          
-          // Arreglo Webp -> Gif (Discord a veces prefiere gif explícito en embeds)
           if (randomGif.includes('.webp')) {
               randomGif = randomGif.replace('.webp', '.gif');
           }
