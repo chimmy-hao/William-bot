@@ -197,21 +197,23 @@ module.exports = {
               world_tour_notified: true // Lo ponemos en true para que el bot deje de avisar
           }).eq('user_id', userId);
 
-          // 2. Dar Packs (A tabla user_packs)
+          // 2. Dar Packs (CORREGIDO: usa pack_code)
           for (const p of packs) {
               const { data: currentPack } = await supabase
                 .from('user_packs')
                 .select('quantity')
                 .eq('user_id', userId)
-                .eq('pack_id', p.id)
+                .eq('pack_code', p.id) // <--- CORREGIDO: pack_code
                 .single();
               
               const newQty = (currentPack?.quantity || 0) + 1;
               
-              await supabase.from('user_packs').upsert(
-                { user_id: userId, pack_id: p.id, quantity: newQty }, 
-                { onConflict: 'user_id, pack_id' }
+              const { error: packError } = await supabase.from('user_packs').upsert(
+                { user_id: userId, pack_code: p.id, quantity: newQty }, // <--- CORREGIDO: pack_code
+                { onConflict: 'user_id, pack_code' } // <--- CORREGIDO: Conflicto correcto
               );
+
+              if(packError) console.error("Error entregando pack:", packError);
           }
 
           // --- LOG HISTORIAL ---
