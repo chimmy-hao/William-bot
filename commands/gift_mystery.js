@@ -22,7 +22,6 @@ const ALLOWED_ROLES = [
 ];
 
 // 2. TABLA DE PROBABILIDADES (Loot Table)
-// Modifica esto según el evento que quieras lanzar
 const LOOT_TABLE = [
   { code: 'banana', chance: 30 },     // 30%
   { code: 'grape', chance: 30 },      // 30%
@@ -69,7 +68,6 @@ module.exports = {
 
   async execute(interaction) {
     // --- 🔒 VERIFICACIÓN DE SEGURIDAD ---
-    // Comprueba si el usuario tiene ALGUNO de los roles permitidos
     const hasPermission = interaction.member.roles.cache.some(role => ALLOWED_ROLES.includes(role.id));
 
     if (!hasPermission) {
@@ -159,6 +157,16 @@ module.exports = {
             { user_id: i.user.id, pack_code: wonCode, quantity: newQty },
             { onConflict: ['user_id', 'pack_code'] }
           );
+
+          // --- LOGGING NUEVO ---
+          await supabase.from('gift_logs').insert({
+            user_id: i.user.id,
+            username: i.user.username,
+            gift_type: 'mystery_pack',
+            gift_detail: wonPack.name,
+            event_source: 'gift_mystery'
+          });
+          // ---------------------
 
           claimedUsers.add(i.user.id);
 
