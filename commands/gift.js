@@ -193,6 +193,16 @@ module.exports = {
             }
           }
 
+          // --- LOGGING NUEVO ---
+          await supabase.from('gift_logs').insert({
+            user_id: i.user.id,
+            username: i.user.username,
+            gift_type: moneyAmount ? 'money' : (packData ? 'pack' : 'card'),
+            gift_detail: moneyAmount ? `${moneyAmount} Monedas` : (packData ? packData.name : actualPrizeString),
+            event_source: 'gift'
+          });
+          // ---------------------
+
           claimedUsers.add(i.user.id);
           await i.reply({ content: `✅ ¡Has reclamado ${actualPrizeString}!`, ephemeral: true });
 
