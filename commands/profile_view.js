@@ -13,22 +13,20 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('profile_view')
     .setDescription('👤 Ver tu perfil o el de otro usuario')
-    // AQUI AGREGAMOS LA OPCIÓN DE USUARIO
     .addUserOption(option => 
       option.setName('user')
         .setDescription('¿El perfil de quién quieres ver?')
-        .setRequired(false) // Es opcional: si no pones nada, muestra el tuyo
+        .setRequired(false)
     ),
 
   async execute(interaction) {
-    // LÓGICA: Si seleccionaron un usuario, usamos ese. Si no, usamos al que escribió el comando.
     const targetUser = interaction.options.getUser('user') || interaction.user;
     const userId = targetUser.id;
 
     try {
       await interaction.deferReply();
 
-      // 1. Buscar datos del usuario en Supabase
+      // 1. Buscar datos del usuario
       const { data: user, error: userError } = await supabase
         .from('users')
         .select('*')
@@ -36,7 +34,6 @@ module.exports = {
         .single();
 
       if (userError || !user) {
-        // Mensaje diferente si soy yo o si es otro
         const msg = targetUser.id === interaction.user.id 
           ? '❌ No tienes un perfil registrado aún.' 
           : `❌ **${targetUser.username}** no tiene un perfil registrado.`;
@@ -51,7 +48,6 @@ module.exports = {
         .eq('user_id', userId);
 
       if (countError) {
-        console.error(countError);
         return interaction.editReply('❌ Error al contar las cartas.');
       }
 
@@ -68,23 +64,33 @@ module.exports = {
           .single();
 
         if (!favError && favCard && favCard.base_cards) {
-          favCardInfo = `⭐ **${favCard.base_cards.name}** (${favCard.base_cards.group_name || 'sin grupo'})\n🆔 ${favCard.unique_card_id}`;
+          favCardInfo = `**${favCard.base_cards.name}** (${favCard.base_cards.group_name || 'Soloist'})`;
           favCardImage = favCard.base_cards.image_url;
         }
       }
 
-      // 4. Crear Embed
+      // 4. LÓGICA DE FOTO (Automática)
+      const avatarUrl = user.profile_image ? user.profile_image : targetUser.displayAvatarURL({ dynamic: true });
+
+      // 5. Crear Embed (Orden Reorganizado)
       const embed = new EmbedBuilder()
         .setColor('#1abc9c')
-        .setTitle(`👤 Perfil de ${targetUser.username}`) // Nombre del usuario objetivo
+        .setTitle(`👤 Perfil de ${targetUser.username}`)
+        .setThumbnail(avatarUrl)
         .addFields(
+          // Fila 1: Economía y Colección
           { name: `${moneyEmoji} Balance`, value: `${user.balance}`, inline: true },
           { name: `${backpackEmoji} Cartas`, value: `${count}`, inline: true },
-          // AQUÍ ESTÁ EL CAMBIO: Agregado 'es-ES'
+          
+          // Fila 2: Fecha de inicio
           { name: '📅 Jugando desde', value: user.created_at ? new Date(user.created_at).toLocaleDateString('es-ES') : 'Desconocido', inline: true },
-          { name: '⭐ Favorita', value: favCardInfo }
+
+          // Fila 3: Racha (Línea propia antes del Idol)
+          { name: '🔥 Racha', value: `${user.daily_streak || 0} días`, inline: false },
+
+          // Fila 4: Idol Favorito
+          { name: '⭐ Tu Idol', value: favCardInfo, inline: false }
         )
-        .setThumbnail(targetUser.displayAvatarURL({ dynamic: true })) // Avatar del usuario objetivo
         .setTimestamp();
 
       if (favCardImage) {
