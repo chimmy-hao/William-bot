@@ -45,10 +45,11 @@ module.exports = {
     const userId = interaction.user.id;
     const now = Date.now();
 
-    // 1. COOLDOWN
+    // 1. COOLDOWN Y DATOS PREVIOS
+    // Se agrega daily_streak a la selección para poder calcular
     let { data: userCheck } = await supabase
         .from('users')
-        .select('last_daily_claim')
+        .select('last_daily_claim, daily_streak')
         .eq('user_id', userId)
         .single();
 
@@ -66,6 +67,19 @@ module.exports = {
 
     try {
       await interaction.deferReply();
+
+      // --- LÓGICA DE RACHA (STREAK) ---
+      const diffTime = now - lastUsed;
+      const oneDay = 24 * 60 * 60 * 1000;
+      let currentStreak = userCheck?.daily_streak || 0;
+
+      // Si pasaron menos de 48 horas (2 días), se mantiene la racha
+      if (diffTime < (oneDay * 2) && diffTime > 0) {
+          currentStreak += 1;
+      } else {
+          // Si pasó más tiempo o es la primera vez, reinicia a 1
+          currentStreak = 1;
+      }
 
       // 2. BUSCAR PREMIO (SOLO ACTIVAS)
       const { data: rareCards, error: cardError } = await supabase
@@ -105,7 +119,8 @@ module.exports = {
         .update({ 
             balance: newBalance,
             last_daily_claim: now,
-            daily_notified: false
+            daily_notified: false,
+            daily_streak: currentStreak // <--- ACTUALIZAMOS RACHA
         })
         .eq('user_id', userId);
 
@@ -128,8 +143,9 @@ module.exports = {
           .setColor('#e84393')
           .setTitle('📅 Recompensa Diaria')
           .setDescription(
-            `Por ayudarlo a planear su cita con Est, William te otorga **${REWARD_AMOUNT}** ${moneyEmoji} y la carta \`${uniqueCode}\`.` +
-            `\n\n🃏 **Carta recibida:** ${randomCard.name}`
+            `Por ayudarlo a planear su cita con Est, William te otorga **${REWARD_AMOUNT}** ${moneyEmoji} y la carta \`${uniqueCode}\`.\n\n` +
+            `🔥 **Racha Actual:** ${currentStreak} días\n\n` + // <--- MOSTRAMOS RACHA
+            `🃏 **Carta recibida:** ${randomCard.name}`
           )
           .setTimestamp();
 
