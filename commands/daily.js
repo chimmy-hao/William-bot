@@ -9,10 +9,10 @@ const supabase = createClient(
 const moneyEmoji = '<:berrycoin:1411737957081288724>';
 
 // --- CONFIGURACIÓN ---
-const COOLDOWN_TIME = 12 * 60 * 60 * 1000; // 12 Horas
+const COOLDOWN_TIME = 12 * 60 * 60 * 1000; 
 const REWARD_AMOUNT = 2000;
-const REWARD_RARITY = 2; // ⚠️ ESTRICTO: Solo Rareza 2
-const EVENT_CHANCE = 0.5; // 50% probabilidad de evento
+const REWARD_RARITY = 2; // Solo Rareza 2
+const EVENT_CHANCE = 0.5; // 50% chance
 
 const williamDailyGifs = [
     'https://media.tenor.com/ggNFlSnG8vwAAAAC/williamest-yeolykn.gif',
@@ -44,14 +44,13 @@ module.exports = {
     const userId = interaction.user.id;
     const now = Date.now();
 
-    // 1. COOLDOWN Y DATOS PREVIOS
-    let { data: userCheck, error: userError } = await supabase
+    // 1. CHEQUEO DE COOLDOWN
+    let { data: userCheck } = await supabase
         .from('users')
         .select('last_daily_claim, daily_streak')
         .eq('user_id', userId)
         .single();
-    
-    // Si no existe el usuario, no pasa nada, se crea luego.
+
     const lastUsed = userCheck?.last_daily_claim || 0; 
     const remaining = COOLDOWN_TIME - (now - lastUsed);
 
@@ -71,80 +70,79 @@ module.exports = {
       const diffTime = now - lastUsed;
       const oneDay = 24 * 60 * 60 * 1000;
       let currentStreak = userCheck?.daily_streak || 0;
-
-      if (diffTime < (oneDay * 2) && diffTime > 0) {
-          currentStreak += 1;
-      } else {
-          currentStreak = 1;
-      }
+      if (diffTime < (oneDay * 2) && diffTime > 0) currentStreak += 1;
+      else currentStreak = 1;
 
       // ---------------------------------------------------------
-      // 2. BUSCAR PREMIO (LÓGICA BLINDADA)
+      // 2. BUSCAR CARTAS (ESTRATEGIA SEGURA)
       // ---------------------------------------------------------
       
+      // PASO A: Traemos TODAS las cartas de Rareza 2 activas.
+      // (Esta es la misma consulta que usa /test_db y sabemos que funciona)
+      const { data: allRareCards, error: dbError } = await supabase
+          .from('base_cards')
+          .select('*')
+          .eq('rarity_level', REWARD_RARITY) // Rareza 2
+          .eq('is_active', true);
+
+      if (dbError || !allRareCards || allRareCards.length === 0) {
+          console.error("Daily Error:", dbError);
+          return interaction.editReply('❌ **Error Crítico:** El sistema no detecta cartas de Rareza 2 (aunque el test diga que sí).');
+      }
+
+      // PASO B: Filtramos en JAVASCRIPT (Más seguro que SQL ahora mismo)
+      // Separamos las cartas en dos grupos: Evento y Normales
+      const eventCards = [];
+      const normalCards = [];
+
+      // Revisamos eventos activos en DB
+      const { data: activeConfigs } = await supabase
+          .from('events_config')
+          .select('event_name')
+          .eq('is_active', true);
+      
+      const activeEventNames = activeConfigs ? activeConfigs.map(e => e.event_name) : [];
+
+      // Clasificamos las cartas que bajamos
+      allRareCards.forEach(card => {
+          if (card.event_type && card.event_type !== "") {
+              // Es de evento. ¿Está activo el evento?
+              if (activeEventNames.includes(card.event_type)) {
+                  eventCards.push(card);
+              }
+          } else {
+              // Es normal (event_type es null o vacío)
+              normalCards.push(card);
+          }
+      });
+
+      // PASO C: Tiramos el dado
       const isEventDrop = Math.random() < EVENT_CHANCE;
       let finalPool = [];
-      
-      // A. INTENTO: BUSCAR EVENTO (Solo si salió en el dado Y hay eventos activos)
-      if (isEventDrop) {
-          const { data: activeEvents } = await supabase
-              .from('events_config')
-              .select('event_name')
-              .eq('is_active', true);
 
-          const activeEventList = activeEvents ? activeEvents.map(e => e.event_name) : [];
-
-          if (activeEventList.length > 0) {
-              const { data: eventCards } = await supabase
-                  .from('base_cards')
-                  .select('*')
-                  .in('event_type', activeEventList)
-                  .eq('is_active', true); // Siempre verificar que la carta esté activa
-              
-              if (eventCards && eventCards.length > 0) {
-                  finalPool = eventCards;
-              }
-          }
+      if (isEventDrop && eventCards.length > 0) {
+          finalPool = eventCards; // Ganó evento y hay cartas
+      } else {
+          finalPool = normalCards; // Ganó normal (o falló evento)
       }
 
-      // B. FALLBACK: BUSCAR NORMAL RAREZA 2 (Si no salió evento o no había)
+      // FALLBACK FINAL: Si el pool está vacío (ej: salió normal pero no hay normales, rarísimo)
       if (finalPool.length === 0) {
-          // Buscamos cartas Rareza 2 que NO sean de evento.
-          // Usamos .or() para aceptar NULL o string vacío, por si acaso.
-          const { data: normalRareCards, error: normalError } = await supabase
-            .from('base_cards')
-            .select('*')
-            .eq('rarity_level', REWARD_RARITY) 
-            .eq('is_active', true)
-            .or('event_type.is.null,event_type.eq.""'); // <--- CORRECCIÓN CLAVE
-          
-          if (normalError) {
-              console.error("Error Supabase Normal Cards:", normalError);
-          }
-
-          if (normalRareCards && normalRareCards.length > 0) {
-              finalPool = normalRareCards;
-          }
-      }
-
-      // SI AÚN ASÍ ESTÁ VACÍO...
-      if (!finalPool || finalPool.length === 0) {
-        console.log("⚠️ DEBUG: Falló la búsqueda. Verifica RLS en Supabase o que existan cartas con rarity_level=2 y event_type=null");
-        return interaction.editReply('❌ **Error de Configuración:** No se encontraron cartas de **Rareza 2** disponibles.\n*Nota para el Admin: Revisa las Políticas RLS en Supabase.*');
+          // Si no hay de lo que buscábamos, usamos CUALQUIERA de rareza 2 que tengamos
+          finalPool = allRareCards; 
       }
 
       // Elegir carta ganadora
       const randomCard = finalPool[Math.floor(Math.random() * finalPool.length)];
       const uniqueCode = generateUniqueCardCode(randomCard.card_code);
-
       const isEventCard = randomCard.event_type !== null && randomCard.event_type !== "";
+      
       const cardLabel = isEventCard 
             ? `✨ **${randomCard.name}** (${randomCard.event_type.toUpperCase()})` 
             : `🃏 **${randomCard.name}**`;
 
-      // 3. ACTUALIZAR USUARIO
+      // 3. LOGICA DE USUARIO Y ENTREGA (Igual que siempre)
       let { data: userData } = await supabase.from('users').select('balance').eq('user_id', userId).single();
-
       if (!userData) {
         const { data: newUser } = await supabase.from('users').insert({ user_id: userId, username: interaction.user.username, balance: 0 }).select().single();
         userData = newUser;
@@ -152,7 +150,6 @@ module.exports = {
 
       const newBalance = (userData.balance || 0) + REWARD_AMOUNT;
 
-      // 4. GUARDAR
       await supabase.from('users').update({ 
             balance: newBalance,
             last_daily_claim: now,
@@ -171,10 +168,10 @@ module.exports = {
           user_id: userId,
           action_type: 'daily',
           amount: REWARD_AMOUNT,
-          details: `Reclamó daily. Carta: ${randomCard.name} [${isEventCard ? 'EVENT' : 'NORMAL'}]`
+          details: `Reclamó daily. Carta: ${randomCard.name}`
       });
 
-      // 5. RESPUESTA
+      // EMBED RESPUESTA
       const embed = new EmbedBuilder()
           .setColor(isEventCard ? '#E1306C' : '#e84393')
           .setTitle(isEventCard ? '📸 Recompensa Diaria: ¡Evento!' : '📅 Recompensa Diaria')
@@ -185,7 +182,7 @@ module.exports = {
           )
           .setTimestamp();
 
-      if (williamDailyGifs && williamDailyGifs.length > 0) {
+      if (williamDailyGifs.length > 0) {
           const randomGif = williamDailyGifs[Math.floor(Math.random() * williamDailyGifs.length)];
           embed.setImage(randomGif);
       } 
@@ -193,12 +190,8 @@ module.exports = {
       await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
-      console.error('Error en daily:', error);
-      if (!interaction.deferred && !interaction.replied) {
-          await interaction.reply({ content: '❌ Error interno.', ephemeral: true });
-      } else {
-          await interaction.editReply('❌ Hubo un error al reclamar.');
-      }
+      console.error('Error daily:', error);
+      if(!interaction.replied) await interaction.editReply('❌ Error interno.');
     }
   }
 };
