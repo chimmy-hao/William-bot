@@ -78,48 +78,72 @@ module.exports = {
       await interaction.deferReply();
 
       // ---------------------------------------------------------
-      // 2. LÓGICA DEL JUEGO (LÓGICA MAESTRA)
+      // 2. LÓGICA DEL JUEGO (LÓGICA MAESTRA CON VERIFICACIÓN DE EVENTO)
       // ---------------------------------------------------------
       
       // A. Determinamos si es un Drop de Evento
       const isEventDrop = (Math.random() * 100) < EVENT_DROP_RATE;
+      let finalPool = [];
+      let searchingEvent = false;
       
-      let query = supabase.from('base_cards').select('*').eq('is_active', true);
-
       if (isEventDrop) {
-          // 🔥 MODO EVENTO: Buscamos cartas que TENGAN algún event_type (Insta, Verano, etc.)
-          query = query.not('event_type', 'is', null);
-      } else {
-          // 🃏 MODO NORMAL: Buscamos por rareza y que NO sean de evento
-          const targetRarity = rollRarity();
-          query = query
-              .eq('rarity_level', targetRarity)
-              .is('event_type', null); // Importante: Excluir eventos del drop normal
-      }
+          // 🔥 MODO EVENTO: Verificar eventos ACTIVOS
+          const { data: activeEvents } = await supabase
+              .from('events_config')
+              .select('event_name')
+              .eq('is_active', true);
 
-      let { data: candidateCards, error: fetchError } = await query;
+          const activeEventList = activeEvents ? activeEvents.map(e => e.event_name) : [];
 
-      // B. Fallback de Seguridad
-      // Si salió "Evento" pero no hay cartas de evento cargadas (o error), volvemos a normal.
-      if (fetchError || !candidateCards || candidateCards.length === 0) {
-          if (isEventDrop) console.log("⚠️ Intento de drop de evento fallido (sin cartas), usando fallback.");
-          
-          // Buscamos cartas normales activas de cualquier rareza como respaldo final
-          const { data: backupCards } = await supabase
-            .from('base_cards')
-            .select('*')
-            .eq('is_active', true)
-            .is('event_type', null); // Solo normales
-           
-          candidateCards = backupCards;
-          
-          if (!candidateCards || candidateCards.length === 0) {
-            return interaction.editReply('❌ Error crítico: No hay cartas activas en la base de datos.');
+          if (activeEventList.length > 0) {
+              searchingEvent = true;
+              // Buscamos cartas de eventos activos
+              const { data: eventCards } = await supabase
+                  .from('base_cards')
+                  .select('*')
+                  .in('event_type', activeEventList)
+                  .eq('is_active', true);
+              
+              if (eventCards && eventCards.length > 0) {
+                  finalPool = eventCards;
+              }
           }
       }
 
+      // B. Fallback de Seguridad / Drop Normal
+      // Si no era evento, o era evento pero no había activos/cartas, buscamos normales
+      if (finalPool.length === 0) {
+          if (isEventDrop && searchingEvent) console.log("⚠️ Intento de drop de evento fallido (sin cartas), usando fallback.");
+          
+          // MODO NORMAL: Buscamos por rareza y que NO sean de evento
+          const targetRarity = rollRarity();
+          const { data: normalCards } = await supabase
+              .from('base_cards')
+              .select('*')
+              .eq('rarity_level', targetRarity)
+              .is('event_type', null) // Excluir eventos
+              .eq('is_active', true);
+          
+          finalPool = normalCards;
+      }
+
+      // Validación final
+      if (!finalPool || finalPool.length === 0) {
+        // Último intento: buscar cualquier carta normal activa
+         const { data: backupCards } = await supabase
+            .from('base_cards')
+            .select('*')
+            .is('event_type', null)
+            .eq('is_active', true);
+         finalPool = backupCards;
+
+         if (!finalPool || finalPool.length === 0) {
+             return interaction.editReply('❌ Error crítico: No hay cartas activas en la base de datos.');
+         }
+      }
+
       // C. Elegir carta aleatoria
-      const randomCard = candidateCards[Math.floor(Math.random() * candidateCards.length)];
+      const randomCard = finalPool[Math.floor(Math.random() * finalPool.length)];
       const uniqueId = generateUniqueCardCode(randomCard.card_code);
       
       // Determinar nivel visual final
@@ -149,7 +173,6 @@ module.exports = {
 
       // Historial
       const cleanNameLog = randomCard.name.split(' — ')[0].trim();
-      // Agregamos info extra si es de evento
       const typeLog = randomCard.event_type ? `[${randomCard.event_type.toUpperCase()}]` : `Rareza ${level}`;
       
       await supabase.from('history_logs').insert({
