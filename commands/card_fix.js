@@ -18,21 +18,22 @@ const OWNER_ID = '1411356161063518228';
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('card_fix')
-    .setDescription('🛠️ ADMIN: Corrige datos o imagen de una carta ya existente.')
+    .setDescription('🛠️ ADMIN: Corrige datos, imagen o evento de una carta.')
     .addStringOption(opt => 
       opt.setName('code') 
-        .setDescription('El código EXACTO de la carta (Ej: SWJLT3)')
+        .setDescription('El código EXACTO de la carta (Ej: WMO-IG1)')
         .setRequired(true)
         .setAutocomplete(true)
     )
     .addStringOption(opt => opt.setName('grupo').setDescription('(Opcional) Nuevo nombre del grupo'))
     .addStringOption(opt => opt.setName('idol').setDescription('(Opcional) Nuevo nombre del idol'))
-    .addStringOption(opt => opt.setName('era').setDescription('(Opcional) Nueva Era'))
+    .addStringOption(opt => opt.setName('era').setDescription('(Opcional) Nueva Era visual'))
+    // NUEVA OPCIÓN: EVENTO
+    .addStringOption(opt => opt.setName('evento').setDescription('(Opcional) Nuevo tag de Evento (ej: verano, insta). Escribe "borrar" para quitar.'))
     .addAttachmentOption(opt => opt.setName('imagen').setDescription('(Opcional) Nueva imagen (Sobrescribe la anterior)')),
 
   // --- AUTOCOMPLETADO ---
   async autocomplete(interaction) {
-    // Seguridad extra: Si no es el dueño, no le mostramos ni las opciones
     if (interaction.user.id !== OWNER_ID) return interaction.respond([]);
 
     const focusedValue = interaction.options.getFocused();
@@ -52,9 +53,9 @@ module.exports = {
 
   // --- EJECUCIÓN ---
   async execute(interaction) {
-    // 1. Verificar Permisos (SOLO ID ESPECÍFICO)
+    // 1. Verificar Permisos
     if (interaction.user.id !== OWNER_ID) {
-        return interaction.reply({ content: '🚫 **Acceso Denegado:** Este comando es exclusivo para el Owner.', ephemeral: true });
+        return interaction.reply({ content: '🚫 **Acceso Denegado:** Exclusivo para el Owner.', ephemeral: true });
     }
 
     const targetCode = interaction.options.getString('code').toUpperCase().trim();
@@ -63,17 +64,18 @@ module.exports = {
     const newGroup = interaction.options.getString('grupo');
     const newIdol = interaction.options.getString('idol');
     const newEra = interaction.options.getString('era');
+    const newEvent = interaction.options.getString('evento'); // Nuevo
     const newImage = interaction.options.getAttachment('imagen');
 
-    // Verificar que haya al menos un cambio
-    if (!newGroup && !newIdol && !newEra && !newImage) {
-        return interaction.reply({ content: '⚠️ No has puesto nada para cambiar. Rellena al menos un campo opcional (Grupo, Idol, Era o Imagen).', ephemeral: true });
+    // Verificar que haya cambios
+    if (!newGroup && !newIdol && !newEra && !newImage && !newEvent) {
+        return interaction.reply({ content: '⚠️ Debes rellenar al menos un campo para editar.', ephemeral: true });
     }
 
     try {
       await interaction.deferReply();
 
-      // 2. Buscar la carta original
+      // 2. Buscar carta original
       const { data: originalCard, error: fetchError } = await supabase
         .from('base_cards')
         .select('*')
@@ -81,7 +83,7 @@ module.exports = {
         .single();
 
       if (fetchError || !originalCard) {
-        return interaction.editReply(`❌ No se encontró ninguna carta con el código **${targetCode}**.`);
+        return interaction.editReply(`❌ No se encontró la carta **${targetCode}**.`);
       }
 
       // 3. Preparar actualizaciones
@@ -100,22 +102,33 @@ module.exports = {
           updates.era = newEra;
           changesLog.push(`💿 Era: ${originalCard.era} ➔ **${newEra}**`);
       }
+      
+      // Lógica para Evento
+      if (newEvent) {
+          const lowerEvent = newEvent.toLowerCase();
+          // Si escribe "borrar", "null" o "quitar", limpiamos el evento
+          if (['borrar', 'null', 'quitar', 'ninguno'].includes(lowerEvent)) {
+              updates.event_type = null;
+              changesLog.push(`🎉 Evento: ${originalCard.event_type || 'Ninguno'} ➔ **(Eliminado)**`);
+          } else {
+              updates.event_type = lowerEvent;
+              changesLog.push(`🎉 Evento: ${originalCard.event_type || 'Ninguno'} ➔ **${lowerEvent}**`);
+          }
+      }
 
-      // 4. Manejo de Imagen (Cloudinary)
+      // 4. Manejo de Imagen
       if (newImage) {
           const uploadResult = await cloudinary.uploader.upload(newImage.url, { 
-              folder: 'photocards', 
+              folder: originalCard.event_type ? `photocards/${originalCard.event_type}` : 'photocards', 
               public_id: targetCode, 
               format: 'webp', 
               overwrite: true,
               invalidate: true 
           });
 
-          // Parche de versión para evitar caché de Discord
           const freshUrl = `${uploadResult.secure_url}?v=${Date.now()}`;
-          
           updates.image_url = freshUrl;
-          changesLog.push(`🖼️ **Imagen reemplazada**`);
+          changesLog.push(`🖼️ **Imagen actualizada**`);
       }
 
       // 5. Actualizar Supabase
@@ -126,25 +139,23 @@ module.exports = {
 
       if (updateError) throw updateError;
 
-      // 6. Log al Historial
+      // 6. Log Historial
       await supabase.from('history_logs').insert({
           user_id: interaction.user.id,
           action_type: 'admin_fix',
           details: `Fix ${targetCode}: ${Object.keys(updates).join(', ')}`
       });
 
-      // 7. Respuesta Visual
+      // 7. Respuesta
       const embed = new EmbedBuilder()
-        .setColor('#2ecc71')
-        .setTitle(`🛠️ Carta Corregida: ${targetCode}`)
+        .setColor('#e67e22') // Naranja de "reparación"
+        .setTitle(`🛠️ Carta Actualizada: ${targetCode}`)
         .setDescription(changesLog.join('\n'))
-        .addFields(
-            { 
-                name: 'Datos actuales', 
-                value: `**${updates.name || originalCard.name}**\n${updates.group_name || originalCard.group_name}\n${updates.era || originalCard.era}` 
-            }
-        )
-        .setFooter({ text: `Editado por ${interaction.user.username}` })
+        .addFields({ 
+            name: 'Estado Actual', 
+            value: `**${updates.name || originalCard.name}**\n${updates.group_name || originalCard.group_name}\nEra: ${updates.era || originalCard.era}\nEvento: \`${updates.event_type !== undefined ? updates.event_type : (originalCard.event_type || 'Ninguno')}\`` 
+        })
+        .setFooter({ text: `Admin: ${interaction.user.username}` })
         .setTimestamp();
 
       if (updates.image_url) {
@@ -157,7 +168,7 @@ module.exports = {
 
     } catch (error) {
       console.error('Error en card_fix:', error);
-      await interaction.editReply('❌ Ocurrió un error al intentar editar la carta en la base de datos.');
+      await interaction.editReply('❌ Error al editar la carta.');
     }
   }
 };
