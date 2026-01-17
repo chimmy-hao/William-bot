@@ -74,7 +74,7 @@ module.exports = {
       else currentStreak = 1;
 
       // ---------------------------------------------------------
-      // 2. BUSCAR CARTAS (ESTRATEGIA SEGURA)
+      // 2. BUSCAR CARTAS (ESTRATEGIA SEGURA: BAJAR TODO)
       // ---------------------------------------------------------
       
       // PASO A: Traemos TODAS las cartas de Rareza 2 activas.
@@ -85,9 +85,13 @@ module.exports = {
           .eq('rarity_level', REWARD_RARITY) // Rareza 2
           .eq('is_active', true);
 
-      if (dbError || !allRareCards || allRareCards.length === 0) {
-          console.error("Daily Error:", dbError);
-          return interaction.editReply('❌ **Error Crítico:** El sistema no detecta cartas de Rareza 2 (aunque el test diga que sí).');
+      if (dbError) {
+          console.error("Daily Error DB:", dbError);
+          return interaction.editReply(`❌ **Error de Base de Datos:** ${dbError.message}`);
+      }
+
+      if (!allRareCards || allRareCards.length === 0) {
+          return interaction.editReply('❌ **Error Crítico:** El sistema devolvió 0 cartas de Rareza 2 (¿Está vacía la tabla?).');
       }
 
       // PASO B: Filtramos en JAVASCRIPT (Más seguro que SQL ahora mismo)
@@ -105,7 +109,7 @@ module.exports = {
 
       // Clasificamos las cartas que bajamos
       allRareCards.forEach(card => {
-          if (card.event_type && card.event_type !== "") {
+          if (card.event_type && card.event_type.trim() !== "") {
               // Es de evento. ¿Está activo el evento?
               if (activeEventNames.includes(card.event_type)) {
                   eventCards.push(card);
@@ -126,16 +130,17 @@ module.exports = {
           finalPool = normalCards; // Ganó normal (o falló evento)
       }
 
-      // FALLBACK FINAL: Si el pool está vacío (ej: salió normal pero no hay normales, rarísimo)
+      // FALLBACK FINAL: Si el pool está vacío (ej: salió normal pero no hay normales)
       if (finalPool.length === 0) {
           // Si no hay de lo que buscábamos, usamos CUALQUIERA de rareza 2 que tengamos
+          // (Esto evita el error critico si tienes 30 cartas pero el filtro falló)
           finalPool = allRareCards; 
       }
 
       // Elegir carta ganadora
       const randomCard = finalPool[Math.floor(Math.random() * finalPool.length)];
       const uniqueCode = generateUniqueCardCode(randomCard.card_code);
-      const isEventCard = randomCard.event_type !== null && randomCard.event_type !== "";
+      const isEventCard = randomCard.event_type && randomCard.event_type.trim() !== "";
       
       const cardLabel = isEventCard 
             ? `✨ **${randomCard.name}** (${randomCard.event_type.toUpperCase()})` 
@@ -191,7 +196,7 @@ module.exports = {
 
     } catch (error) {
       console.error('Error daily:', error);
-      if(!interaction.replied) await interaction.editReply('❌ Error interno.');
+      if(!interaction.replied) await interaction.editReply('❌ Error interno: ' + error.message);
     }
   }
 };
