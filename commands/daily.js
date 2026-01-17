@@ -12,9 +12,9 @@ const moneyEmoji = '<:berrycoin:1411737957081288724>';
 const COOLDOWN_TIME = 12 * 60 * 60 * 1000; // 12 Horas
 const REWARD_AMOUNT = 2000;
 const REWARD_RARITY = 2; 
+const EVENT_CHANCE = 0.5; // 50% de probabilidad de evento
 
-// --- LISTA DE GIFS (ENLACES CORREGIDOS) ---
-// Usamos enlaces directos .gif para evitar que se congelen
+// --- LISTA DE GIFS ---
 const williamDailyGifs = [
     'https://media.tenor.com/ggNFlSnG8vwAAAAC/williamest-yeolykn.gif',
     'https://media.tenor.com/PM1ITcPfrbsAAAAC/lyknzip-williamest.gif',
@@ -46,7 +46,6 @@ module.exports = {
     const now = Date.now();
 
     // 1. COOLDOWN Y DATOS PREVIOS
-    // Se agrega daily_streak a la selección para poder calcular
     let { data: userCheck } = await supabase
         .from('users')
         .select('last_daily_claim, daily_streak')
@@ -73,29 +72,62 @@ module.exports = {
       const oneDay = 24 * 60 * 60 * 1000;
       let currentStreak = userCheck?.daily_streak || 0;
 
-      // Si pasaron menos de 48 horas (2 días), se mantiene la racha
       if (diffTime < (oneDay * 2) && diffTime > 0) {
           currentStreak += 1;
       } else {
-          // Si pasó más tiempo o es la primera vez, reinicia a 1
           currentStreak = 1;
       }
 
-      // 2. BUSCAR PREMIO (SOLO ACTIVAS)
-      const { data: rareCards, error: cardError } = await supabase
-        .from('base_cards')
-        .select('*')
-        .eq('rarity_level', REWARD_RARITY)
-        .eq('is_active', true); 
+      // ---------------------------------------------------------
+      // 2. BUSCAR PREMIO (SISTEMA HÍBRIDO NORMAL / EVENTO)
+      // ---------------------------------------------------------
+      
+      // Decidimos si buscamos Evento o Normal (50/50)
+      const isEventDrop = Math.random() < EVENT_CHANCE;
+      
+      let query = supabase.from('base_cards').select('*').eq('is_active', true);
 
-      if (cardError || !rareCards || rareCards.length === 0) {
-        return interaction.editReply('❌ Error: No hay cartas de rareza 2 disponibles o activas.');
+      if (isEventDrop) {
+          // 🔥 BUSCAR EVENTO: Cualquier carta que tenga 'event_type' (no sea null)
+          query = query.not('event_type', 'is', null);
+      } else {
+          // 🃏 BUSCAR NORMAL: Rareza 2 y que NO sea evento (event_type es null)
+          query = query.eq('rarity_level', REWARD_RARITY).is('event_type', null);
       }
 
-      const randomCard = rareCards[Math.floor(Math.random() * rareCards.length)];
+      const { data: potentialCards, error: cardError } = await query;
+
+      // --- FALLBACK (SEGURIDAD) ---
+      // Si salió "Evento" pero no hay cartas de evento en la DB, la lista vendrá vacía.
+      // En ese caso, buscamos cartas normales para no dar error.
+      let finalPool = potentialCards;
+
+      if (cardError || !finalPool || finalPool.length === 0) {
+          // console.log("⚠️ Fallback activado: No se encontraron cartas (posiblemente falta de eventos), buscando normales.");
+          const { data: backup } = await supabase
+            .from('base_cards')
+            .select('*')
+            .eq('rarity_level', REWARD_RARITY)
+            .is('event_type', null) // Solo normales
+            .eq('is_active', true);
+          finalPool = backup;
+      }
+
+      if (!finalPool || finalPool.length === 0) {
+        return interaction.editReply('❌ Error crítico: No hay cartas configuradas en el sistema.');
+      }
+
+      // Elegir carta ganadora
+      const randomCard = finalPool[Math.floor(Math.random() * finalPool.length)];
       const uniqueCode = generateUniqueCardCode(randomCard.card_code);
 
-      // 3. OBTENER USUARIO
+      // Detectar si la carta ganada es de evento (para el mensaje)
+      const isEventCard = randomCard.event_type !== null;
+      const cardLabel = isEventCard 
+            ? `✨ **${randomCard.name}** (${randomCard.event_type.toUpperCase()})` 
+            : `🃏 **${randomCard.name}**`;
+
+      // 3. OBTENER/CREAR USUARIO
       let { data: userData } = await supabase
         .from('users')
         .select('balance')
@@ -120,14 +152,14 @@ module.exports = {
             balance: newBalance,
             last_daily_claim: now,
             daily_notified: false,
-            daily_streak: currentStreak // <--- ACTUALIZAMOS RACHA
+            daily_streak: currentStreak 
         })
         .eq('user_id', userId);
 
       await supabase.from('user_cards').insert({
         user_id: userId,
         card_id: randomCard.id,
-        rarity: randomCard.rarity_level,
+        rarity: randomCard.rarity_level, // Generalmente 2 para estos casos
         unique_card_id: uniqueCode
       });
 
@@ -135,22 +167,20 @@ module.exports = {
           user_id: userId,
           action_type: 'daily',
           amount: REWARD_AMOUNT,
-          details: `Reclamó daily. Carta extra: ${randomCard.name}`
+          details: `Reclamó daily. Carta: ${randomCard.name} [${isEventCard ? 'EVENT' : 'NORMAL'}]`
       });
 
       // 5. RESPUESTA VISUAL
       const embed = new EmbedBuilder()
-          .setColor('#e84393')
-          .setTitle('📅 Recompensa Diaria')
+          .setColor(isEventCard ? '#E1306C' : '#e84393') // Color especial si es evento
+          .setTitle(isEventCard ? '📸 Recompensa Diaria: ¡Evento!' : '📅 Recompensa Diaria')
           .setDescription(
             `Por ayudarlo a planear su cita con Est, William te otorga **${REWARD_AMOUNT}** ${moneyEmoji} y la carta \`${uniqueCode}\`.\n\n` +
-            `🔥 **Racha Actual:** ${currentStreak} días\n\n` + // <--- MOSTRAMOS RACHA
-            `🃏 **Carta recibida:** ${randomCard.name}`
+            `🔥 **Racha Actual:** ${currentStreak} días\n\n` + 
+            `🎁 **Carta recibida:** ${cardLabel}`
           )
           .setTimestamp();
 
-      // Ya no necesitamos el "parche" de webp porque actualizamos la lista arriba
-      // Pero dejamos una lógica simple por seguridad
       if (williamDailyGifs && williamDailyGifs.length > 0) {
           const randomGif = williamDailyGifs[Math.floor(Math.random() * williamDailyGifs.length)];
           embed.setImage(randomGif);
