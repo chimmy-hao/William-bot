@@ -79,38 +79,52 @@ module.exports = {
       }
 
       // ---------------------------------------------------------
-      // 2. BUSCAR PREMIO (SISTEMA HÍBRIDO NORMAL / EVENTO)
+      // 2. BUSCAR PREMIO (SISTEMA HÍBRIDO CON VALIDACIÓN DE ACTIVIDAD)
       // ---------------------------------------------------------
       
-      // Decidimos si buscamos Evento o Normal (50/50)
+      // Decidimos si intentamos buscar Evento o Normal (50/50)
       const isEventDrop = Math.random() < EVENT_CHANCE;
-      
-      let query = supabase.from('base_cards').select('*').eq('is_active', true);
+      let finalPool = [];
+      let searchingEvent = false;
 
       if (isEventDrop) {
-          // 🔥 BUSCAR EVENTO: Cualquier carta que tenga 'event_type' (no sea null)
-          query = query.not('event_type', 'is', null);
-      } else {
-          // 🃏 BUSCAR NORMAL: Rareza 2 y que NO sea evento (event_type es null)
-          query = query.eq('rarity_level', REWARD_RARITY).is('event_type', null);
+          // A. Verificar qué eventos están ACTIVOS en la tabla de configuración
+          const { data: activeEvents } = await supabase
+              .from('events_config')
+              .select('event_name')
+              .eq('is_active', true);
+
+          // Lista de nombres de eventos activos (ej: ['insta', 'halloween'])
+          const activeEventList = activeEvents ? activeEvents.map(e => e.event_name) : [];
+
+          // Si hay al menos un evento activo, buscamos cartas de esos eventos
+          if (activeEventList.length > 0) {
+              searchingEvent = true;
+              const { data: eventCards } = await supabase
+                  .from('base_cards')
+                  .select('*')
+                  .in('event_type', activeEventList) // Solo tipos que estén activos
+                  .eq('is_active', true);
+              
+              if (eventCards && eventCards.length > 0) {
+                  finalPool = eventCards;
+              }
+          }
       }
 
-      const { data: potentialCards, error: cardError } = await query;
-
-      // --- FALLBACK (SEGURIDAD) ---
-      // Si salió "Evento" pero no hay cartas de evento en la DB, la lista vendrá vacía.
-      // En ese caso, buscamos cartas normales para no dar error.
-      let finalPool = potentialCards;
-
-      if (cardError || !finalPool || finalPool.length === 0) {
-          // console.log("⚠️ Fallback activado: No se encontraron cartas (posiblemente falta de eventos), buscando normales.");
-          const { data: backup } = await supabase
+      // --- FALLBACK ---
+      // Si no era drop de evento, O si era evento pero no había ninguno activo,
+      // O si había activo pero no tenía cartas -> Buscamos cartas NORMALES
+      if (finalPool.length === 0) {
+          // Buscamos cartas normales (Rareza 2, sin evento)
+          const { data: normalCards } = await supabase
             .from('base_cards')
             .select('*')
             .eq('rarity_level', REWARD_RARITY)
-            .is('event_type', null) // Solo normales
+            .is('event_type', null)
             .eq('is_active', true);
-          finalPool = backup;
+          
+          finalPool = normalCards;
       }
 
       if (!finalPool || finalPool.length === 0) {
