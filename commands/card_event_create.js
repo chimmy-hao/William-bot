@@ -11,7 +11,10 @@ const cloudinary = require('cloudinary').v2;
 
 // --- CONFIGURACIÓN ---
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
-const ANNOUNCEMENT_CHANNEL_ID = '1411784592192573601'; // Canal de Cards
+const ANNOUNCEMENT_CHANNEL_ID = '1411784592192573601'; // ID del canal de anuncios
+
+// TU EMOJI PERSONALIZADO
+const strawberryEmoji = '<:strawberrity:1440934894443429909>';
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -19,17 +22,17 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Roles permitidos (Tu ID y el del Staff)
+// Roles permitidos
 const ALLOWED_ROLES = ['1412852141197885464', '1411356161063518228'];
 
-// Función helper para capitalizar (ej: verano -> Verano)
+// Función helper
 const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('card_event_create')
     .setDescription('🎉 Staff: Sube carta para CUALQUIER evento (Rareza 2)')
-    .setDefaultMemberPermissions(0) // Invisible para usuarios normales
+    .setDefaultMemberPermissions(0)
     .addStringOption(opt => opt.setName('id').setDescription('Código único (ej: WMO-SUM1)').setRequired(true))
     .addStringOption(opt => opt.setName('grupo').setDescription('Nombre del Grupo').setRequired(true))
     .addStringOption(opt => opt.setName('artista').setDescription('Nombre del Idol').setRequired(true))
@@ -46,11 +49,10 @@ module.exports = {
            .setRequired(false)
     ),
 
-  // --- AUTOCOMPLETADO DE EVENTOS ---
+  // --- AUTOCOMPLETADO ---
   async autocomplete(interaction) {
     const focusedValue = interaction.options.getFocused().toLowerCase();
     
-    // Buscamos eventos existentes
     const { data } = await supabase
         .from('base_cards')
         .select('event_type')
@@ -67,7 +69,6 @@ module.exports = {
   },
 
   async execute(interaction) {
-    // 1. Verificar Permisos
     const hasPermission = interaction.member.roles.cache.some(role => ALLOWED_ROLES.includes(role.id));
     if (!hasPermission) {
       return interaction.reply({ content: '🚫 No tienes permisos para usar este comando.', ephemeral: true });
@@ -101,23 +102,16 @@ module.exports = {
         return interaction.editReply(`⛔ El ID \`${baseId}\` ya existe.`);
       }
 
-      // --- PREVIEW ---
+      // --- PREVIEW (Solo para ti) ---
       const previewEmbed = new EmbedBuilder()
         .setColor('#9b59b6')
         .setTitle(`🎉 Confirmar Evento: ${eventDisplay}`)
-        .setDescription(`Se guardará con la etiqueta interna **event_type: ${eventRaw}**.`)
-        .addFields(
-          { name: 'ID', value: baseId, inline: true },
-          { name: 'Idol', value: idol, inline: true },
-          { name: 'Grupo', value: group, inline: true },
-          { name: 'Visual', value: eventDisplay, inline: true },
-          { name: 'Créditos', value: creatorName, inline: true }
-        )
+        .setDescription(`Se guardará como **${eventRaw}**.\n\n**Visual:**\n**${idol} — ${group}**\nEvento: ${eventDisplay}\nCode: ${baseId}`)
         .setImage(image.url)
-        .setFooter({ text: 'Verifica los datos antes de confirmar.' });
+        .setFooter({ text: `Créditos internos: ${creatorName}` });
 
       const buttons = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('confirm_event').setLabel('Subir Carta').setStyle(ButtonStyle.Success).setEmoji('✅'),
+        new ButtonBuilder().setCustomId('confirm_event').setLabel('Subir y Anunciar').setStyle(ButtonStyle.Success).setEmoji('✅'),
         new ButtonBuilder().setCustomId('cancel_event').setLabel('Cancelar').setStyle(ButtonStyle.Danger).setEmoji('🗑️')
       );
 
@@ -131,10 +125,10 @@ module.exports = {
         }
 
         if (i.customId === 'confirm_event') {
-          await i.update({ content: '⏳ Procesando subida...', components: [] });
+          await i.update({ content: '⏳ Procesando...', components: [] });
 
           try {
-            // A. Subir a Cloudinary
+            // A. Cloudinary
             const upload = await cloudinary.uploader.upload(image.url, { 
                 folder: `photocards/${eventRaw}`, 
                 public_id: baseId, 
@@ -142,7 +136,7 @@ module.exports = {
                 overwrite: true 
             });
 
-            // B. Guardar en Supabase
+            // B. Supabase
             const { error } = await supabase.from('base_cards').insert({
                 card_code: baseId,
                 name: idol,
@@ -158,16 +152,19 @@ module.exports = {
 
             if (error) throw error;
 
-            // C. Log Público (EN EL CANAL ESPECÍFICO)
+            // C. ANUNCIO OFICIAL (Canal de Cards)
             const logEmbed = new EmbedBuilder()
                 .setColor('#9b59b6')
-                .setTitle(`✨ New Event Card: ${eventDisplay}`)
-                .setDescription(`**${idol}** (${group}) ha llegado para el evento **${eventDisplay}**.`)
-                .addFields({ name: 'Creado por', value: creatorName, inline: true })
+                .setTitle('✨ New event photocards have been added!')
+                .setDescription(
+                    `**${idol} — ${group}**\n` +
+                    `Evento: ${eventDisplay}\n` +
+                    `${strawberryEmoji} ${strawberryEmoji} Code: ${baseId}`
+                )
                 .setImage(upload.secure_url)
-                .setFooter({ text: `Event ID: ${baseId}` });
+                .setFooter({ text: 'added by: strawberrysweeties' });
 
-            // ENVIAMOS AL CANAL DE CARDS
+            // Enviar al canal de anuncios
             try {
                 const channel = await interaction.client.channels.fetch(ANNOUNCEMENT_CHANNEL_ID);
                 if (channel) await channel.send({ embeds: [logEmbed] });
@@ -175,8 +172,7 @@ module.exports = {
                 console.error("No se pudo enviar al canal de anuncios:", chanErr);
             }
 
-            // Confirmación efímera al admin
-            await interaction.editReply({ content: '✅ Carta subida y anunciada exitosamente.', embeds: [] });
+            await interaction.editReply({ content: '✅ Carta subida y anunciada correctamente.', embeds: [] });
 
           } catch (err) {
             console.error(err);
