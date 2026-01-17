@@ -11,9 +11,7 @@ const supabase = createClient(
 // --- CONFIGURACIÓN ---
 const strawberryEmoji = '<:strawberrity:1411384728119939182>';
 const COOLDOWN_TIME = 5 * 60 * 1000; // 5 minutos
-
-// 1. CONFIGURACIÓN DE PROBABILIDADES
-const EVENT_DROP_RATE = 15; // 15% de chance de que salga carta de Evento
+const EVENT_DROP_RATE = 15; // 15% chance de Evento
 
 const DROP_RATES = {
   1: 70, 
@@ -26,7 +24,6 @@ const rarityConfig = {
   1: { display: `${strawberryEmoji}`, name: 'Rareza 1', color: '#95a5a6' },
   2: { display: `${strawberryEmoji}${strawberryEmoji}`, name: 'Rareza 2', color: '#3498db' },
   3: { display: `${strawberryEmoji}${strawberryEmoji}${strawberryEmoji}`, name: 'Rareza 3', color: '#9b59b6' },
-  // Configuración especial para eventos (Opcional, usa el color que quieras)
   'event': { display: '✨', name: 'Evento Especial', color: '#E1306C' } 
 };
 
@@ -36,7 +33,7 @@ const generateUniqueCardCode = (baseCode) => {
   return `${baseCode}.${randomSuffix}`;
 };
 
-// Función para determinar rareza (Solo para cartas normales)
+// Función simple para rareza
 const rollRarity = () => {
   const roll = Math.random() * 100;
   if (roll < DROP_RATES[1]) return 1;
@@ -54,9 +51,7 @@ module.exports = {
     const now = Date.now();
 
     try {
-      // ---------------------------------------------------------
-      // 1. VERIFICACIÓN DE COOLDOWN
-      // ---------------------------------------------------------
+      // 1. COOLDOWN
       let { data: userCheck } = await supabase
         .from('users')
         .select('last_photocard_claim')
@@ -78,79 +73,101 @@ module.exports = {
       await interaction.deferReply();
 
       // ---------------------------------------------------------
-      // 2. LÓGICA DEL JUEGO (LÓGICA MAESTRA CON VERIFICACIÓN DE EVENTO)
+      // 2. OBTENCIÓN DE CARTAS (ESTRATEGIA BLINDADA "TODO EN UNO")
       // ---------------------------------------------------------
       
-      // A. Determinamos si es un Drop de Evento
-      const isEventDrop = (Math.random() * 100) < EVENT_DROP_RATE;
-      let finalPool = [];
-      let searchingEvent = false;
+      // A. Bajamos TODAS las cartas activas y la configuración de eventos
+      const [cardsResult, eventsResult] = await Promise.all([
+          supabase.from('base_cards').select('*').eq('is_active', true),
+          supabase.from('events_config').select('event_name').eq('is_active', true)
+      ]);
+
+      const allCards = cardsResult.data;
+      const activeEvents = eventsResult.data ? eventsResult.data.map(e => e.event_name) : [];
+
+      if (!allCards || allCards.length === 0) {
+          return interaction.editReply('❌ **Error Crítico:** No hay cartas activas en el sistema.');
+      }
+
+      // B. Clasificación en Memoria (JavaScript)
+      const poolEvents = [];
+      const poolNormal = {
+          1: [],
+          2: [],
+          3: []
+      };
+
+      allCards.forEach(card => {
+          // Chequeamos si es evento (tiene texto en event_type)
+          if (card.event_type && card.event_type.trim() !== "") {
+              // Solo entra al pool si el evento está ACTIVO
+              if (activeEvents.includes(card.event_type)) {
+                  poolEvents.push(card);
+              }
+          } else {
+              // Es Normal: Clasificar por rareza
+              const r = card.rarity_level || 1; 
+              if (poolNormal[r]) {
+                  poolNormal[r].push(card);
+              } else {
+                  // Por si tienes rareza 4 o algo raro, lo metemos en 1 por defecto
+                  poolNormal[1].push(card); 
+              }
+          }
+      });
+
+      // ---------------------------------------------------------
+      // 3. LÓGICA DE DROP (TIRADA DE DADOS)
+      // ---------------------------------------------------------
       
-      if (isEventDrop) {
-          // 🔥 MODO EVENTO: Verificar eventos ACTIVOS
-          const { data: activeEvents } = await supabase
-              .from('events_config')
-              .select('event_name')
-              .eq('is_active', true);
+      let finalPool = [];
+      const isEventRoll = (Math.random() * 100) < EVENT_DROP_RATE;
+      let selectedRarity = 1; // Default
+      let isEventCard = false;
 
-          const activeEventList = activeEvents ? activeEvents.map(e => e.event_name) : [];
+      // INTENTO A: Drop de Evento
+      if (isEventRoll && poolEvents.length > 0) {
+          finalPool = poolEvents;
+          isEventCard = true;
+      } 
+      
+      // INTENTO B: Drop Normal (Si no salió evento, o no había cartas de evento)
+      if (finalPool.length === 0) {
+          isEventCard = false;
+          selectedRarity = rollRarity(); // 1, 2 o 3
 
-          if (activeEventList.length > 0) {
-              searchingEvent = true;
-              // Buscamos cartas de eventos activos
-              const { data: eventCards } = await supabase
-                  .from('base_cards')
-                  .select('*')
-                  .in('event_type', activeEventList)
-                  .eq('is_active', true);
-              
-              if (eventCards && eventCards.length > 0) {
-                  finalPool = eventCards;
+          // Intentamos usar el pool de la rareza que salió
+          if (poolNormal[selectedRarity] && poolNormal[selectedRarity].length > 0) {
+              finalPool = poolNormal[selectedRarity];
+          } else {
+              // FALLBACK 1: Si salió Rareza 3 pero no hay, busca Rareza 2, luego 1
+              // Juntamos todas las normales disponibles
+              const allNormals = [...poolNormal[1], ...poolNormal[2], ...poolNormal[3]];
+              if (allNormals.length > 0) {
+                  finalPool = allNormals;
+                  // console.log("⚠️ Fallback activado: Usando cualquier normal disponible.");
               }
           }
       }
 
-      // B. Fallback de Seguridad / Drop Normal
-      // Si no era evento, o era evento pero no había activos/cartas, buscamos normales
+      // FALLBACK NUCLEAR: Si no hay normales, usa eventos (y viceversa) -> CUALQUIER CARTA
       if (finalPool.length === 0) {
-          if (isEventDrop && searchingEvent) console.log("⚠️ Intento de drop de evento fallido (sin cartas), usando fallback.");
-          
-          // MODO NORMAL: Buscamos por rareza y que NO sean de evento
-          const targetRarity = rollRarity();
-          const { data: normalCards } = await supabase
-              .from('base_cards')
-              .select('*')
-              .eq('rarity_level', targetRarity)
-              .is('event_type', null) // Excluir eventos
-              .eq('is_active', true);
-          
-          finalPool = normalCards;
+          finalPool = allCards;
       }
 
-      // Validación final
-      if (!finalPool || finalPool.length === 0) {
-        // Último intento: buscar cualquier carta normal activa
-         const { data: backupCards } = await supabase
-            .from('base_cards')
-            .select('*')
-            .is('event_type', null)
-            .eq('is_active', true);
-         finalPool = backupCards;
-
-         if (!finalPool || finalPool.length === 0) {
-             return interaction.editReply('❌ Error crítico: No hay cartas activas en la base de datos.');
-         }
-      }
-
-      // C. Elegir carta aleatoria
+      // 4. SELECCIÓN FINAL
       const randomCard = finalPool[Math.floor(Math.random() * finalPool.length)];
       const uniqueId = generateUniqueCardCode(randomCard.card_code);
       
-      // Determinar nivel visual final
+      // Definimos la estética final
+      // Si salió de la bolsa de eventos, forzamos que se vea como evento
+      if (poolEvents.includes(randomCard)) isEventCard = true; 
+      
+      // Nivel visual
       const level = randomCard.rarity_level || 1;
 
       // ---------------------------------------------------------
-      // 3. ACTUALIZAR DB + NOTIFICACIÓN + HISTORIAL
+      // 5. GUARDADO EN BASE DE DATOS
       // ---------------------------------------------------------
       await supabase.from('users').upsert(
         { 
@@ -173,7 +190,7 @@ module.exports = {
 
       // Historial
       const cleanNameLog = randomCard.name.split(' — ')[0].trim();
-      const typeLog = randomCard.event_type ? `[${randomCard.event_type.toUpperCase()}]` : `Rareza ${level}`;
+      const typeLog = isEventCard ? `[EVENT: ${randomCard.event_type}]` : `Rareza ${level}`;
       
       await supabase.from('history_logs').insert({
           user_id: userId,
@@ -182,7 +199,7 @@ module.exports = {
       });
 
       // ---------------------------------------------------------
-      // 4. PROCESAMIENTO DE IMAGEN (CANVAS)
+      // 6. GENERACIÓN DE IMAGEN (CANVAS) Y EMBED
       // ---------------------------------------------------------
       let attachment = null;
       try {
@@ -194,7 +211,6 @@ module.exports = {
         ctx.imageSmoothingQuality = 'high';     
         
         const radius = 50; 
-
         ctx.beginPath();
         ctx.moveTo(radius, 0);
         ctx.lineTo(img.width - radius, 0);
@@ -206,30 +222,27 @@ module.exports = {
         ctx.lineTo(0, radius);
         ctx.quadraticCurveTo(0, 0, radius, 0);
         ctx.closePath();
-        
         ctx.clip(); 
         ctx.drawImage(img, 0, 0);
         
         attachment = new AttachmentBuilder(await canvas.encode('png'), { name: 'drop.png' });
       } catch (err) {
-        console.error('Error procesando imagen canvas:', err);
+        console.error('Error canvas:', err);
       }
 
-      // ---------------------------------------------------------
-      // 5. EMBED FINAL
-      // ---------------------------------------------------------
+      // Configuración del Embed
       const rConfig = rarityConfig[level];
       const cleanName = randomCard.name.split(' — ')[0].trim();
       const creatorName = randomCard.creator ? `@${randomCard.creator}` : 'William System';
       
-      // Personalizamos el mensaje si es Evento
       let rarityDisplay = `${rConfig.display} ${rConfig.name}`;
       let embedColor = rConfig.color;
       let titleText = '✨ ¡Nueva Photocard Obtenida! ✨';
 
-      if (randomCard.event_type) {
-          rarityDisplay = `🌟 Evento: ${randomCard.event_type.charAt(0).toUpperCase() + randomCard.event_type.slice(1)}`;
-          embedColor = '#E1306C'; // Color especial para eventos
+      if (isEventCard) {
+          const eventName = randomCard.event_type ? randomCard.event_type.charAt(0).toUpperCase() + randomCard.event_type.slice(1) : 'Especial';
+          rarityDisplay = `🌟 Evento: ${eventName}`;
+          embedColor = '#E1306C'; 
           titleText = '📸 ¡Carta de Evento Obtenida! 🎉';
       }
 
@@ -260,7 +273,7 @@ module.exports = {
 
     } catch (error) {
       console.error('Error en /photocard:', error);
-      await interaction.editReply('❌ Hubo un error al obtener tu carta.');
+      await interaction.editReply('❌ Hubo un error al obtener tu carta. (Revisa consola)');
     }
   }
 };
