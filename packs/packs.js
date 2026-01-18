@@ -25,13 +25,21 @@ module.exports = {
     name: 'Orange Pack',
     code: 'orange',
     price: 8000,
-    type: 'random5_group' // 👈 5 random, necesita grupo
+    type: 'random5_group'
   },
   strawberry: {
     emoji: '<:pack_strawberry:1413292056830545970>',
     name: 'Strawberry Pack',
     code: 'strawberry',
     price: 10000,
-    type: 'random5_group_idol' // 👈 5 random, necesita grupo + idol
+    type: 'random5_group_idol'
+  },
+  // ✨ NUEVO PACK DE EVENTOS ✨
+  fruit_drops: {
+    emoji: '<:fruit_drops:1462587443889963039>',
+    name: 'Fruit Drops',
+    code: 'drops',
+    price: 5000, // 👈 Ajusta el precio a tu gusto
+    type: 'random3_event' // 👈 Tipo especial para lógica de eventos
   }
 };
