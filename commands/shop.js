@@ -1,12 +1,12 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 // --- EMOJIS ---
 const moneyEmoji = '<:berrycoin:1411737957081288724>';
-const strawberrity = '<:strawberrity:1440934894443429909>'; // 🍓 Variable corregida
-const strawvent = '<:strawvent:1462665407218585620>';       // ✨ Variable corregida
+const strawberrity = '<:strawberrity:1440934894443429909>'; 
+const strawvent = '<:strawvent:1462665407218585620>';       
 
 // --- DICCIONARIO DE CONTENIDOS ---
 const PACK_CONTENTS = {
@@ -20,7 +20,6 @@ const PACK_CONTENTS = {
   
   'strawberry': `• **5x** Aleatorias\n✨ **Garantizado:** Mismo Idol`,
   
-  // ✨ Fruit Drops
   'drops':  `3 cartas de evento ${strawvent}${strawvent}`
 };
 
@@ -48,15 +47,20 @@ module.exports = {
         return interaction.editReply('🏪 La tienda está vacía por el momento.');
       }
 
-      // 2. Crear el Embed
+      // 2. Preparar la IMAGEN LOCAL (shop.png)
+      // Asegúrate de que shop.png esté en la carpeta principal del bot
+      const shopImage = new AttachmentBuilder('./shop.png');
+
+      // 3. Crear el Embed
       const embed = new EmbedBuilder()
         .setTitle('🛍️ Tienda de Cartas (Card Shop)')
         .setDescription(`Usa \`/buy pack:Nombre\` para comprar.`)
         .setColor('Purple') 
-        .setThumbnail('https://cdn-icons-png.flaticon.com/512/1162/1162951.png')
+        // Aquí le decimos que use la imagen adjunta como thumbnail
+        .setThumbnail('attachment://shop.png') 
         .setTimestamp();
 
-      // 3. Agregar cada pack
+      // 4. Agregar cada pack
       packs.forEach(pack => {
         const contentDesc = PACK_CONTENTS[pack.code] || '📦 Contenido sorpresa';
 
@@ -69,11 +73,17 @@ module.exports = {
 
       embed.setFooter({ text: 'Los precios pueden variar según eventos o demanda.' });
 
-      await interaction.editReply({ embeds: [embed] });
+      // IMPORTANTE: Enviar el embed Y el archivo adjunto
+      await interaction.editReply({ embeds: [embed], files: [shopImage] });
 
     } catch (err) {
       console.error('Error en shop:', err);
-      await interaction.editReply('❌ Ocurrió un error inesperado.');
+      // Si falla porque no encuentra la imagen, avisa
+      if (err.code === 'ENOENT') {
+          await interaction.editReply('❌ Error: No encuentro el archivo `shop.png` en la carpeta del bot.');
+      } else {
+          await interaction.editReply('❌ Ocurrió un error inesperado.');
+      }
     }
   }
 };
