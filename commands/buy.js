@@ -23,9 +23,9 @@ module.exports = {
         .setAutocomplete(true)
         .setRequired(false)
     )
-    // OPCIÓN B: CARTAS (Múltiples códigos)
+    // OPCIÓN B: CARTAS
     .addStringOption(opt =>
-        opt.setName('cards') // Cambiado a plural para que se entienda
+        opt.setName('cards') 
           .setDescription('Códigos del Marketplace separados por espacio (Ej: WMO.1234 CES.5678)')
           .setRequired(false)
       )
@@ -187,7 +187,7 @@ module.exports = {
                     // 1. Cobrar al comprador
                     await supabase.from('users').update({ balance: checkUser.balance - totalCost }).eq('user_id', userId);
 
-                    // 2. Procesar cada carta (Pagar al vendedor y Transferir)
+                    // 2. Procesar cada carta
                     for (const card of validCards) {
                         // A. Pagar al vendedor
                         const { data: seller } = await supabase.from('users').select('balance').eq('user_id', card.user_id).single();
@@ -195,25 +195,24 @@ module.exports = {
                             await supabase.from('users').update({ balance: seller.balance + card.market_price }).eq('user_id', card.user_id);
                         }
 
-                        // B. Transferir carta y quitar precio
+                        // B. Transferir carta
                         await supabase.from('user_cards').update({
                             user_id: userId,
                             market_price: null // Ya no está en venta
                         }).eq('id', card.id);
                     }
 
-                    // --- HISTORIAL (Card Buy) ---
+                    // --- HISTORIAL CORREGIDO (Market Buy) ---
                     await supabase.from('history_logs').insert({
                         user_id: userId,
-                        action_type: 'pack_buy', // Usamos pack_buy o creamos 'card_buy', usaré 'buy' genérico si prefieres, pero pack_buy sale con icono de carrito
+                        action_type: 'market_buy', // 👈 CORREGIDO: market_buy en vez de pack_buy
                         amount: -totalCost,
                         details: `Compró ${validCards.length} cartas en el Marketplace`
                     });
-                    // ----------------------------
+                    // ----------------------------------------
 
                     collector.stop('success');
                     
-                    // MENSAJE FINAL
                     const successEmbed = new EmbedBuilder()
                         .setColor('#2ecc71')
                         .setTitle('✅ ¡Compra Exitosa!')
