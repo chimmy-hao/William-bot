@@ -6,7 +6,7 @@ require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 
 // ==========================================
-// 🌐 SERVIDOR WEB (ESTO ARREGLA LO DE RENDER)
+// 🌐 SERVIDOR WEB (KEEPALIVE)
 // ==========================================
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -16,15 +16,11 @@ const server = http.createServer((req, res) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`🌐 Server listening on port ${PORT}`);
-}).on('error', (err) => {
-    console.error('❌ Server error:', err);
 });
 
 // ==========================================
-// CONFIGURACIÓN DEL BOT
+// CONFIGURACIÓN SUPABASE
 // ==========================================
-
-// Conexión Supabase
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
 let supabase;
@@ -32,10 +28,12 @@ let supabase;
 if (supabaseUrl && supabaseKey) {
     supabase = createClient(supabaseUrl, supabaseKey);
 } else {
-    console.error("⚠️ ADVERTENCIA: Faltan credenciales de SUPABASE en el .env");
+    console.error("⚠️ ADVERTENCIA: Faltan credenciales de SUPABASE.");
 }
 
-// Limpieza de temporales
+// ==========================================
+// LIMPIEZA DE TEMPORALES
+// ==========================================
 const tempDir = path.join(__dirname, 'temp');
 if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
@@ -46,20 +44,21 @@ function cleanupTempDirectory() {
             const filePath = path.join(tempDir, file);
             if (fs.statSync(filePath).isFile()) fs.unlinkSync(filePath);
         }
-        console.log('🧹 Temp cleaned');
     } catch (error) {
         console.error('❌ Error cleaning temp:', error);
     }
 }
 setInterval(cleanupTempDirectory, 3600000);
 
-// Cliente Discord
+// ==========================================
+// CLIENTE DISCORD
+// ==========================================
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
+        GatewayIntentBits.MessageContent, 
+        GatewayIntentBits.GuildMembers    
     ]
 });
 
@@ -116,8 +115,8 @@ const COOLDOWNS = {
     WORK: 5 * 60 * 1000,
     PHOTOCARD: 5 * 60 * 1000,
     GOLIVE: 5 * 60 * 1000,
-    FREESTYLE: 15 * 60 * 1000,    // <--- NUEVO
-    WORLD_TOUR: 15 * 60 * 1000,   // <--- NUEVO
+    FREESTYLE: 15 * 60 * 1000,
+    WORLD_TOUR: 15 * 60 * 1000,
     DAILY: 12 * 60 * 60 * 1000,
     WEEKLY: 7 * 24 * 60 * 60 * 1000
 };
@@ -127,8 +126,6 @@ setInterval(async () => {
         if (!supabase) return; 
         const now = Date.now();
         
-        // Buscamos usuarios que tengan ALGUNA notificación pendiente (false)
-        // Agregamos 'freestyle_notified' y 'world_tour_notified' a la lista
         const { data: users, error } = await supabase
             .from('users')
             .select('*')
@@ -154,7 +151,7 @@ setInterval(async () => {
                 updates.golive_notified = true;
                 if (user.pref_golive !== false) { messages.push("hacer Live Stream 🔴"); shouldSend = true; }
             }
-            // 3. FREESTYLE (Nuevo)
+            // 3. FREESTYLE
             if (user.freestyle_notified === false && now >= (user.last_freestyle || 0) + COOLDOWNS.FREESTYLE) {
                 updates.freestyle_notified = true;
                 if (user.pref_freestyle !== false) { messages.push("practicar Freestyle 🎤"); shouldSend = true; }
@@ -164,9 +161,8 @@ setInterval(async () => {
                 updates.photocard_notified = true;
                 if (user.pref_photocard !== false) { messages.push("buscar cartas 🎰"); shouldSend = true; }
             }
-            // 5. WORLD TOUR (Nuevo - Requiere consulta extra)
+            // 5. WORLD TOUR
             if (user.world_tour_notified === false) {
-                // Consultamos la tabla world_tours solo si es necesario
                 const { data: tour } = await supabase.from('world_tours').select('last_checkin').eq('user_id', user.user_id).single();
                 const lastCheckin = tour?.last_checkin ? new Date(tour.last_checkin).getTime() : 0;
                 
@@ -185,7 +181,7 @@ setInterval(async () => {
                 updates.weekly_notified = true;
                 if (user.pref_weekly !== false) { messages.push("reclamar pack semanal 🗓️"); shouldSend = true; }
             }
-            // 8. ALPHA & LICUADORA (Reset fijo)
+            // 8. ALPHA & LICUADORA
             if (user.alpha_notified === false && now >= (user.alpha_reset_time || 0)) {
                 updates.alpha_notified = true;
                 if (user.pref_alpha !== false) { messages.push("intentar Proyecto Alpha 🐺"); shouldSend = true; }
@@ -207,7 +203,6 @@ setInterval(async () => {
                         await channel.send(`Hey <@${user.user_id}>, William ya está listo para **${actionText}**!`).catch(() => {});
                     }
                 }
-                // Guardar cambios en DB para no repetir
                 await supabase.from('users').update(updates).eq('user_id', user.user_id);
             }
         }
@@ -216,9 +211,13 @@ setInterval(async () => {
     }
 }, 60000); 
 
+// ==========================================
+// EVENTOS DISCORD
+// ==========================================
+
 // Evento Ready
 client.once(Events.ClientReady, async readyClient => {
-    console.log(`🤖 Logged in as ${readyClient.user.tag}`);
+    console.log(`🎉 LOGGED IN AS ${readyClient.user.tag}!`); // 👈 SI VES ESTO, FUNCIONA
     client.user.setPresence({ activities: [{ name: 'ทัก (FIRST SIGHT) - LYKN', type: 2 }], status: 'online' });
     
     await deployCommands(); 
@@ -237,12 +236,14 @@ client.on(Events.InteractionCreate, async interaction => {
 
         if (!interaction.isChatInputCommand()) return;
 
+        // Registro de canal para notificaciones
         if (interaction.channelId && supabase) {
-            const { error } = await supabase.from('users').upsert({
+             supabase.from('users').upsert({
                 user_id: interaction.user.id,
                 last_channel_id: interaction.channelId
-            }, { onConflict: 'user_id' });
-            if (error) console.log("Nota: No se pudo actualizar canal.");
+            }, { onConflict: 'user_id' }).then(({ error }) => {
+                if(error) console.error("Error saving channel:", error);
+            });
         }
         
         if (!command) return;
@@ -256,35 +257,30 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 });
 
-process.on('uncaughtException', console.error);
-process.on('unhandledRejection', console.error);
-
+// Manejo de errores globales
+process.on('uncaughtException', (err) => {
+    console.error('🔥 Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (err) => {
+    console.error('🔥 Unhandled Rejection:', err);
+});
 
 // ==========================================
-// 🚨 ZONA DE DIAGNÓSTICO Y ARRANQUE 🚨
+// 🚀 ARRANQUE FINAL
 // ==========================================
 
-console.log("🔍 DIAGNÓSTICO DE ARRANQUE INICIADO...");
+console.log("🔍 Starting bot...");
 loadCommands();
 
 const token = process.env.DISCORD_TOKEN;
 
 if (!token) {
-    console.error("\n❌❌❌ ERROR FATAL ❌❌❌");
-    console.error("No se encontró la variable DISCORD_TOKEN en el entorno.");
-    console.error("Asegúrate de agregarla en la pestaña 'Environment' de Render.");
+    console.error("❌ NO TOKEN FOUND in environment variables!");
 } else {
-    console.log(`✅ Token variable detectada. Iniciando conexión...`);
-    
-    client.login(token)
-        .then(() => {
-            console.log("🎉 ¡LOGIN EXITOSO! William está online."); 
-        })
-        .catch((error) => {
-            console.error("\n💀💀💀 ERROR CRÍTICO AL CONECTAR 💀💀💀");
-            console.error(error);
-            console.error("------------------------------------------------");
-            console.error("SI VES 'TokenInvalid': Ve al Developer Portal -> Bot -> Reset Token y pon el nuevo en Render.");
-            console.error("------------------------------------------------\n");
-        });
+    console.log("🔑 Token found. Attempting login...");
+    client.login(token).catch(err => {
+        console.error("\n💀 FATAL LOGIN ERROR:");
+        console.error(err);
+        console.error("\n👉 CHECK: 1. Token is correct. 2. Intents are enabled in Dev Portal.\n");
+    });
 }
