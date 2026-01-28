@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
+const path = require('path'); // 👈 IMPORTANTE: Esto nos ayuda a encontrar el archivo
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
@@ -47,9 +48,10 @@ module.exports = {
         return interaction.editReply('🏪 La tienda está vacía por el momento.');
       }
 
-      // 2. Preparar la IMAGEN LOCAL (shop.png)
-      // Asegúrate de que shop.png esté en la carpeta principal del bot
-      const shopImage = new AttachmentBuilder('./shop.png');
+      // 2. Preparar la IMAGEN LOCAL (Ruta Absoluta / Blindada)
+      // Esto le dice al bot: "Desde esta carpeta 'commands', sube un nivel (..) y busca shop.png"
+      const imagePath = path.join(__dirname, '..', 'shop.png');
+      const shopImage = new AttachmentBuilder(imagePath);
 
       // 3. Crear el Embed
       const embed = new EmbedBuilder()
@@ -80,7 +82,7 @@ module.exports = {
       console.error('Error en shop:', err);
       // Si falla porque no encuentra la imagen, avisa
       if (err.code === 'ENOENT') {
-          await interaction.editReply('❌ Error: No encuentro el archivo `shop.png` en la carpeta del bot.');
+          await interaction.editReply('❌ Error: No encuentro el archivo `shop.png` en la carpeta principal del bot.');
       } else {
           await interaction.editReply('❌ Ocurrió un error inesperado.');
       }
