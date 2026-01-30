@@ -141,65 +141,28 @@ setInterval(async () => {
             let messages = [];
             let shouldSend = false;
 
-            // 1. WORK
-            if (user.work_notified === false && now >= (user.last_work_claim || 0) + COOLDOWNS.WORK) {
-                updates.work_notified = true;
-                if (user.pref_work !== false) { messages.push("trabajar 💼"); shouldSend = true; }
-            }
-            // 2. GOLIVE
-            if (user.golive_notified === false && now >= (user.last_golive_claim || 0) + COOLDOWNS.GOLIVE) {
-                updates.golive_notified = true;
-                if (user.pref_golive !== false) { messages.push("hacer Live Stream 🔴"); shouldSend = true; }
-            }
-            // 3. FREESTYLE
-            if (user.freestyle_notified === false && now >= (user.last_freestyle || 0) + COOLDOWNS.FREESTYLE) {
-                updates.freestyle_notified = true;
-                if (user.pref_freestyle !== false) { messages.push("practicar Freestyle 🎤"); shouldSend = true; }
-            }
-            // 4. PHOTOCARD
-            if (user.photocard_notified === false && now >= (user.last_photocard_claim || 0) + COOLDOWNS.PHOTOCARD) {
-                updates.photocard_notified = true;
-                if (user.pref_photocard !== false) { messages.push("buscar cartas 🎰"); shouldSend = true; }
-            }
-            // 5. WORLD TOUR
+            // Lógica de notificaciones...
+            if (user.work_notified === false && now >= (user.last_work_claim || 0) + COOLDOWNS.WORK) { updates.work_notified = true; if (user.pref_work !== false) { messages.push("trabajar 💼"); shouldSend = true; } }
+            if (user.golive_notified === false && now >= (user.last_golive_claim || 0) + COOLDOWNS.GOLIVE) { updates.golive_notified = true; if (user.pref_golive !== false) { messages.push("hacer Live Stream 🔴"); shouldSend = true; } }
+            if (user.freestyle_notified === false && now >= (user.last_freestyle || 0) + COOLDOWNS.FREESTYLE) { updates.freestyle_notified = true; if (user.pref_freestyle !== false) { messages.push("practicar Freestyle 🎤"); shouldSend = true; } }
+            if (user.photocard_notified === false && now >= (user.last_photocard_claim || 0) + COOLDOWNS.PHOTOCARD) { updates.photocard_notified = true; if (user.pref_photocard !== false) { messages.push("buscar cartas 🎰"); shouldSend = true; } }
+            
             if (user.world_tour_notified === false) {
                 const { data: tour } = await supabase.from('world_tours').select('last_checkin').eq('user_id', user.user_id).single();
                 const lastCheckin = tour?.last_checkin ? new Date(tour.last_checkin).getTime() : 0;
-                
-                if (now >= lastCheckin + COOLDOWNS.WORLD_TOUR) {
-                    updates.world_tour_notified = true;
-                    if (user.pref_world_tour !== false) { messages.push("continuar el World Tour 🌍"); shouldSend = true; }
-                }
+                if (now >= lastCheckin + COOLDOWNS.WORLD_TOUR) { updates.world_tour_notified = true; if (user.pref_world_tour !== false) { messages.push("continuar el World Tour 🌍"); shouldSend = true; } }
             }
-            // 6. DAILY
-            if (user.daily_notified === false && now >= (user.last_daily_claim || 0) + COOLDOWNS.DAILY) {
-                updates.daily_notified = true;
-                if (user.pref_daily !== false) { messages.push("reclamar daily 📅"); shouldSend = true; }
-            }
-            // 7. WEEKLY
-            if (user.weekly_notified === false && now >= (user.last_weekly_claim || 0) + COOLDOWNS.WEEKLY) {
-                updates.weekly_notified = true;
-                if (user.pref_weekly !== false) { messages.push("reclamar pack semanal 🗓️"); shouldSend = true; }
-            }
-            // 8. ALPHA & LICUADORA
-            if (user.alpha_notified === false && now >= (user.alpha_reset_time || 0)) {
-                updates.alpha_notified = true;
-                if (user.pref_alpha !== false) { messages.push("intentar Proyecto Alpha 🐺"); shouldSend = true; }
-            }
-            if (user.licuadora_notified === false && now >= (user.licuadora_reset_time || 0)) {
-                updates.licuadora_notified = true;
-                if (user.pref_licuadora !== false) { messages.push("usar la Licuadora 🌪️"); shouldSend = true; }
-            }
+            
+            if (user.daily_notified === false && now >= (user.last_daily_claim || 0) + COOLDOWNS.DAILY) { updates.daily_notified = true; if (user.pref_daily !== false) { messages.push("reclamar daily 📅"); shouldSend = true; } }
+            if (user.weekly_notified === false && now >= (user.last_weekly_claim || 0) + COOLDOWNS.WEEKLY) { updates.weekly_notified = true; if (user.pref_weekly !== false) { messages.push("reclamar pack semanal 🗓️"); shouldSend = true; } }
+            if (user.alpha_notified === false && now >= (user.alpha_reset_time || 0)) { updates.alpha_notified = true; if (user.pref_alpha !== false) { messages.push("intentar Proyecto Alpha 🐺"); shouldSend = true; } }
+            if (user.licuadora_notified === false && now >= (user.licuadora_reset_time || 0)) { updates.licuadora_notified = true; if (user.pref_licuadora !== false) { messages.push("usar la Licuadora 🌪️"); shouldSend = true; } }
 
-            // ENVIAR NOTIFICACIÓN
             if (Object.keys(updates).length > 0) {
                 if (shouldSend && messages.length > 0) {
                     const channel = await client.channels.fetch(user.last_channel_id).catch(() => null);
                     if (channel) {
-                        const actionText = messages.length > 1 
-                            ? messages.slice(0, -1).join(', ') + ' y ' + messages.slice(-1) 
-                            : messages[0];
-
+                        const actionText = messages.length > 1 ? messages.slice(0, -1).join(', ') + ' y ' + messages.slice(-1) : messages[0];
                         await channel.send(`Hey <@${user.user_id}>, William ya está listo para **${actionText}**!`).catch(() => {});
                     }
                 }
@@ -212,47 +175,63 @@ setInterval(async () => {
 }, 60000); 
 
 // ==========================================
-// EVENTOS DISCORD
+// EVENTOS DISCORD (VERSIÓN DEBUG / CHISMOSA)
 // ==========================================
 
 // Evento Ready
 client.once(Events.ClientReady, async readyClient => {
-    console.log(`🎉 LOGGED IN AS ${readyClient.user.tag}!`); // 👈 SI VES ESTO, FUNCIONA
+    console.log(`🎉 LOGGED IN AS ${readyClient.user.tag}!`); 
     client.user.setPresence({ activities: [{ name: 'ทัก (FIRST SIGHT) - LYKN', type: 2 }], status: 'online' });
     
     await deployCommands(); 
     cleanupTempDirectory();
 });
 
-// Evento Interaction
+// Evento Interaction MEJORADO
 client.on(Events.InteractionCreate, async interaction => {
-    try {
-        const command = client.commands.get(interaction.commandName);
+    // 1. AVISO INICIAL: Saber que Discord mandó la señal
+    console.log(`📨 SEÑAL RECIBIDA: ${interaction.user.tag} usó ${interaction.commandName || 'un componente'}`);
 
-        if (interaction.isAutocomplete()) {
-            if (command && command.autocomplete) await command.autocomplete(interaction, supabase);
+    try {
+        // Verificar si es comando de chat
+        if (!interaction.isChatInputCommand()) {
+            if (interaction.isAutocomplete()) {
+                const command = client.commands.get(interaction.commandName);
+                if (command && command.autocomplete) await command.autocomplete(interaction, supabase);
+            }
             return;
         }
 
-        if (!interaction.isChatInputCommand()) return;
+        // 2. DIAGNÓSTICO: Ver si el comando existe
+        const command = client.commands.get(interaction.commandName);
 
-        // Registro de canal para notificaciones
+        if (!command) {
+            console.error(`⚠️ ALERTA: El comando '${interaction.commandName}' NO está en la memoria.`);
+            console.error(`📂 Comandos cargados actualmente: ${Array.from(client.commands.keys()).join(', ')}`);
+            return interaction.reply({ content: '❌ Error: El bot no reconoce este comando. Puede que falte el archivo.', ephemeral: true });
+        }
+
+        // 3. BASE DE DATOS: Guardar canal (sin detener el proceso)
         if (interaction.channelId && supabase) {
              supabase.from('users').upsert({
                 user_id: interaction.user.id,
                 last_channel_id: interaction.channelId
             }, { onConflict: 'user_id' }).then(({ error }) => {
-                if(error) console.error("Error saving channel:", error);
+                if(error) console.error("❌ Error guardando canal:", error.message);
             });
         }
         
-        if (!command) return;
+        // 4. EJECUCIÓN CON LOGS
+        console.log(`▶️ Intentando ejecutar ${interaction.commandName}...`);
         await command.execute(interaction, supabase);
+        console.log(`✅ ${interaction.commandName} finalizó correctamente.`);
 
     } catch (error) {
-        console.error(`❌ Interaction Error:`, error);
+        console.error(`❌ ERROR CRÍTICO EN COMANDO:`, error);
         if (!interaction.replied && !interaction.deferred) {
-            await interaction.reply({ content: '❌ Error executing command!', ephemeral: true }).catch(() => {});
+            await interaction.reply({ content: '❌ El bot falló al ejecutar esto. Revisa los logs de Render.', ephemeral: true }).catch(() => {});
+        } else {
+             await interaction.editReply({ content: '❌ Ocurrió un error interno.' }).catch(() => {});
         }
     }
 });
