@@ -354,10 +354,16 @@ module.exports = {
             .addFields({ name: '📝 Mensaje', value: `*${reason}*` })
             .setTimestamp();
 
-          await i.update({ 
+          // 1. Aceptamos el click del botón para que no se quede pensando
+          await i.update({ components: [] });
+
+          // 2. Borramos el mensaje de "¿Confirmar transferencia?" para mantener limpio el chat
+          await interaction.deleteReply().catch(() => {});
+
+          // 3. Enviamos el resultado como un MENSAJE NUEVO (Esto obliga a Discord a mandar la notificación real)
+          await interaction.channel.send({ 
             content: `🔔 <@${receiver.id}> ¡Te ha llegado una transferencia de ${sender}!`,
-            embeds: [successEmbed], 
-            components: [] 
+            embeds: [successEmbed] 
           });
         }
       });
