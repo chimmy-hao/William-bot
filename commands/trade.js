@@ -114,10 +114,6 @@ module.exports = {
       const message = await interaction.editReply({ content: `🔔 <@${target.id}>, tienes una oferta de intercambio.`, embeds: [embed], components: [row] });
 
       // 3. Lógica de Confirmación (Collector)
-      // Necesitamos que el TARGET acepte. El Sender ya aceptó al enviar el comando (o podemos pedirle confirmación también, 
-      // pero para simplificar, asumimos que Sender acepta, y solo Target debe dar click).
-      // MEJORA: Para seguridad total, a veces se pide que AMBOS den click. Aquí solo pediremos al TARGET para agilizar.
-      
       const collector = message.createMessageComponentCollector({ 
         componentType: ComponentType.Button, 
         time: 120000 
@@ -142,7 +138,6 @@ module.exports = {
             }
 
             // RE-VERIFICACIÓN DE PROPIEDAD (Critical Section)
-            // Verificar que aun tengan las cartas (por si las vendieron mientras esperaban)
             const { count: checkMyCards } = await supabase.from('user_cards').select('*', { count: 'exact', head: true }).in('id', myCards.map(c => c.id)).eq('user_id', sender.id);
             const { count: checkTheirCards } = await supabase.from('user_cards').select('*', { count: 'exact', head: true }).in('id', theirCards.map(c => c.id)).eq('user_id', target.id);
 
@@ -156,15 +151,13 @@ module.exports = {
             await supabase.from('user_cards').update({ user_id: sender.id }).in('id', theirCards.map(c => c.id));
 
             // --- HISTORIAL (Logs para ambos) ---
-            // 1. Log para el que envió la oferta
             await supabase.from('history_logs').insert({
                 user_id: sender.id,
-                action_type: 'pack_trade', // Usamos 'trade' o 'pack_trade' para el icono de 🤝
+                action_type: 'pack_trade', 
                 target_id: target.id,
                 details: `Intercambió ${myCards.length} cartas suyas por ${theirCards.length} de ${target.username}`
             });
 
-            // 2. Log para el que aceptó
             await supabase.from('history_logs').insert({
                 user_id: target.id,
                 action_type: 'pack_trade',
@@ -175,9 +168,12 @@ module.exports = {
 
             collector.stop('accepted');
             
-            await i.update({ 
-                content: `✅ **¡Intercambio Exitoso!**\n🤝 <@${sender.id}> y <@${target.id}> han completado el trato.`,
-                components: []
+            // 1. Editamos el mensaje original para quitarle los botones
+            await i.update({ components: [] });
+
+            // 2. Mandamos un mensaje NUEVO para que Discord haga sonar la campanita
+            await interaction.channel.send({ 
+                content: `✅ **¡Intercambio Exitoso!**\n🤝 <@${sender.id}> y <@${target.id}> han completado el trato.`
             });
         }
       });
