@@ -153,12 +153,16 @@ module.exports = {
           if (moneyAmount) {
             const { data: user } = await supabase.from('users').select('balance').eq('user_id', i.user.id).single();
             const currentBal = user ? user.balance : 0;
+            const newBal = currentBal + moneyAmount;
             
             await supabase.from('users').upsert({ 
               user_id: i.user.id, 
               username: i.user.username, 
-              balance: currentBal + moneyAmount 
+              balance: newBal 
             });
+
+            // Actualizamos el string para que muestre el balance nuevo
+            actualPrizeString = `**${moneyAmount}** ${moneyEmoji} \n💰 ¡Ahora tienes un total de **${newBal}** ${moneyEmoji}!`;
           }
 
           // B) PACK
@@ -172,7 +176,7 @@ module.exports = {
             );
           }
 
-          // C) CARTA (Corrección para mostrar nombre)
+          // C) CARTA (Se agrega el código único al mensaje)
           if (giveCard) {
             const { data: cards } = await supabase.from('base_cards').select('id, card_code, name, group_name').eq('rarity_level', 2);
             if (cards && cards.length > 0) {
@@ -188,8 +192,8 @@ module.exports = {
                 unique_card_id: uniqueId
               });
               
-              // Actualizamos el string para decirle qué carta ganó
-              actualPrizeString = `una carta: **${randomCard.name}** (${randomCard.group_name})`;
+              // Actualizamos el string para decirle qué carta ganó y su código
+              actualPrizeString = `una carta: **${randomCard.name}** (${randomCard.group_name})\n🏷️ Código: \`${uniqueId}\``;
             }
           }
 
